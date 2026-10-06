@@ -109,6 +109,7 @@ export default function Navbar({
     dashboard: { label: 'Overview', icon: LayoutDashboard, color: '#4f46e5' },
     analytics: { label: 'BI Analytics', icon: BarChart3, color: '#0284c7' },
     predictive: { label: 'AI Predictive Studio', icon: TrendingUp, color: '#7c3aed' },
+    customers: { label: 'Customer 360 & RFM', icon: UserCheck, color: '#0d9488' },
     alerts: { label: 'Watchdog Alerts', icon: ShieldAlert, color: '#e11d48' },
     connectors: { label: 'Live Connectors', icon: Server, color: '#059669' },
     upload: { label: 'Upload & Clean', icon: UploadCloud, color: '#d97706' },

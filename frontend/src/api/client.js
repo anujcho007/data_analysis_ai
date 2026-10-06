@@ -606,3 +606,32 @@ export async function removeWorkspaceMember(workspaceId, memberId) {
   return handleResponse(res, 'Failed to remove member');
 }
 
+// ==========================================
+// Customer 360 & Growth Intelligence APIs
+// ==========================================
+
+export async function fetchCustomerCandidates(tableName) {
+  const res = await fetch(`${API_BASE}/customers/candidates/${tableName}`, {
+    headers: getAuthHeaders(),
+  });
+  return handleResponse(res, 'Failed to detect customer candidates');
+}
+
+export async function fetchRFMAnalysis(params) {
+  const res = await fetch(`${API_BASE}/customers/rfm`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(params),
+  });
+  return handleResponse(res, 'Failed to compute RFM customer segmentation');
+}
+
+export async function fetchCohortRetention(params) {
+  const res = await fetch(`${API_BASE}/customers/cohorts`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(params),
+  });
+  return handleResponse(res, 'Failed to compute cohort retention matrix');
+}
+

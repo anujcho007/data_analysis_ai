@@ -15,6 +15,7 @@ const UserManagement = lazy(() => import('./views/UserManagement'));
 const CopilotDrawer = lazy(() => import('./components/CopilotDrawer'));
 const WorkspaceModal = lazy(() => import('./components/WorkspaceModal'));
 const DatabaseConnector = lazy(() => import('./components/DatabaseConnector'));
+const CustomerStudio = lazy(() => import('./views/CustomerStudio'));
 
 function StudioLoadingFallback({ label = "Loading Studio..." }) {
   return (
@@ -320,6 +321,14 @@ export default function App() {
           {activeTab === 'predictive' && (
             <Suspense fallback={<StudioLoadingFallback label="Loading Predictive Intelligence & Digital Twin..." />}>
               <PredictiveStudio 
+                tables={tables} 
+              />
+            </Suspense>
+          )}
+
+          {activeTab === 'customers' && (
+            <Suspense fallback={<StudioLoadingFallback label="Loading Customer 360 & Growth Studio..." />}>
+              <CustomerStudio 
                 tables={tables} 
               />
             </Suspense>

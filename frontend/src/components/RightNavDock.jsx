@@ -8,6 +8,7 @@ import {
   UploadCloud, 
   Network, 
   Users, 
+  UserCheck,
   ChevronRight, 
   Sparkles, 
   ChevronLeft,
@@ -53,6 +54,14 @@ export default function RightNavDock({
       icon: TrendingUp,
       badge: 'Twin AI',
       color: '#7c3aed'
+    },
+    { 
+      id: 'customers', 
+      label: 'Customer 360 & RFM', 
+      desc: 'RFM cohorts & retention', 
+      icon: UserCheck,
+      badge: 'Growth',
+      color: '#0d9488'
     },
     { 
       id: 'alerts', 
