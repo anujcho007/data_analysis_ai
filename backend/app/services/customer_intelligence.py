@@ -4,18 +4,27 @@ from typing import Dict, Any, List, Optional, Tuple
 import pandas as pd
 import numpy as np
 
-CUSTOMER_CANDIDATE_SUFFIXES = ('customer_id', 'user_id', 'client_id', 'buyer_id', 'account_id', 'member_id')
-DATE_CANDIDATE_SUFFIXES = ('_date', '_timestamp', 'date', 'datetime', 'created_at', 'order_date', 'timestamp')
-MONETARY_CANDIDATE_KEYWORDS = ('sales_amount', 'amount', 'total', 'revenue', 'price', 'subtotal', 'sales_qty', 'spend')
+CUSTOMER_CANDIDATE_SUFFIXES = (
+    'customer_id', 'user_id', 'client_id', 'buyer_id', 'account_id',
+    'member_id', 'patient_id', 'patient_mrn', 'mrn', 'subscriber_id'
+)
+DATE_CANDIDATE_SUFFIXES = (
+    '_date', '_timestamp', 'date', 'datetime', 'created_at', 'order_date',
+    'timestamp', 'admission_date', 'visit_date', 'encounter_date', 'service_date'
+)
+MONETARY_CANDIDATE_KEYWORDS = (
+    'sales_amount', 'amount', 'total', 'revenue', 'price', 'subtotal',
+    'sales_qty', 'spend', 'charge', 'cost', 'billed', 'claim', 'copay'
+)
 
 def detect_customer_columns(df: pd.DataFrame) -> Dict[str, Optional[str]]:
     """
-    Intelligently identifies customer ID, transaction date, and monetary revenue columns.
+    Intelligently identifies customer/patient ID, transaction/encounter date, and monetary/cost columns.
     """
     cols = list(df.columns)
     cols_lower = [str(c).lower() for c in cols]
 
-    # 1. Customer Column
+    # 1. Customer / Patient Column
     customer_col = None
     for c, cl in zip(cols, cols_lower):
         if any(cl.endswith(sfx) or cl == sfx for sfx in CUSTOMER_CANDIDATE_SUFFIXES):
@@ -23,7 +32,7 @@ def detect_customer_columns(df: pd.DataFrame) -> Dict[str, Optional[str]]:
             break
     if not customer_col:
         for c, cl in zip(cols, cols_lower):
-            if any(kw in cl for kw in ['customer', 'user', 'client', 'email']):
+            if any(kw in cl for kw in ['customer', 'user', 'client', 'email', 'patient', 'member']):
                 customer_col = c
                 break
 

@@ -62,6 +62,16 @@ def test_detect_customer_columns(mock_transaction_dataset):
     assert detected["date_column"] == "order_date"
     assert detected["monetary_column"] == "amount"
 
+def test_detect_healthcare_columns():
+    health_df = pd.DataFrame([
+        {"patient_id": "PAT_101", "admission_date": "2026-01-15", "claim_amount": 4200.50},
+        {"patient_id": "PAT_102", "admission_date": "2026-01-18", "claim_amount": 850.00}
+    ])
+    detected = detect_customer_columns(health_df)
+    assert detected["customer_column"] == "patient_id"
+    assert detected["date_column"] == "admission_date"
+    assert detected["monetary_column"] == "claim_amount"
+
 def test_assign_rfm_segment_logic():
     champ_seg, color, rec = assign_rfm_segment(5, 5, 5)
     assert champ_seg == "Champions"
