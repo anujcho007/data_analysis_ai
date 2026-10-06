@@ -441,6 +441,7 @@ def stream_clean_large_csv_to_warehouse(
     total_rows = 0
     duplicates_removed = 0
     nulls_filled_count = 0
+    str_cols_set = {c for c in sample_df.columns if sample_df[c].dtype == 'object' or pd.api.types.is_string_dtype(sample_df[c])}
 
     for chunk in chunk_iter:
         initial_chunk_len = len(chunk)
@@ -448,9 +449,9 @@ def stream_clean_large_csv_to_warehouse(
             chunk = chunk.drop(columns=[c for c in drop_cols if c in chunk.columns], errors='ignore')
         chunk = chunk.rename(columns=column_mapping)
 
-        # High-speed vectorized string strip & null token sanitization
-        for c in chunk.columns:
-            if chunk[c].dtype == 'object' or pd.api.types.is_string_dtype(chunk[c]):
+        # High-speed vectorized string strip & null token sanitization only on string columns
+        for c in str_cols_set:
+            if c in chunk.columns:
                 s = chunk[c].astype(str).str.strip()
                 chunk[c] = s.mask(s.isin(null_tokens) | chunk[c].isna(), np.nan)
 
@@ -485,18 +486,31 @@ def stream_clean_large_csv_to_warehouse(
         # Direct fast C-level executemany into SQLite
         raw_cursor.executemany(insert_sql, chunk.itertuples(index=False, name=None))
         total_rows += len(chunk)
-        # Commit per chunk to prevent long-held locks and eliminate "database is locked" errors
-        raw_conn.commit()
+        if total_rows % 600_000 == 0:
+            raw_conn.commit()
 
-    # 4. Phase 4: Create indexes on key candidates and temporal columns for high-speed queries & joins
-    temporal_suffixes = ('_date', '_time', '_at', 'timestamp', 'date', 'datetime', 'order_date', 'created_at')
-    for col in sample_df.columns:
-        col_l = col.lower()
-        is_key = col_l.endswith(('_id', '_key', '_code')) or col_l in ['id', 'pk']
-        is_temporal = any(col_l.endswith(sfx) or col_l == sfx for sfx in temporal_suffixes)
-        if is_key or is_temporal:
+    # Commit any remaining records
+    raw_conn.commit()
+
+    # 4. Phase 4: Create indexes on key candidates for high-speed queries & joins
+    # For large datasets (> 1M rows), only index at most 1 primary key column to keep upload times under 30s
+    if total_rows <= 1_000_000:
+        temporal_suffixes = ('_date', '_time', '_at', 'timestamp', 'date', 'datetime', 'order_date', 'created_at')
+        for col in sample_df.columns:
+            col_l = col.lower()
+            is_key = col_l.endswith(('_id', '_key', '_code')) or col_l in ['id', 'pk']
+            is_temporal = any(col_l.endswith(sfx) or col_l == sfx for sfx in temporal_suffixes)
+            if is_key or is_temporal:
+                try:
+                    raw_cursor.execute(f'CREATE INDEX IF NOT EXISTS "idx_{clean_table}_{col}" ON "{clean_table}" ("{col}")')
+                except Exception:
+                    pass
+    else:
+        # Giant dataset (> 1M rows): only create 1 primary key index if present, avoiding multi-minute freezes
+        pk_col = next((c for c in sample_df.columns if c.lower().endswith(('_id', '_pk')) or c.lower() in ['id', 'pk']), None)
+        if pk_col:
             try:
-                raw_cursor.execute(f'CREATE INDEX IF NOT EXISTS "idx_{clean_table}_{col}" ON "{clean_table}" ("{col}")')
+                raw_cursor.execute(f'CREATE INDEX IF NOT EXISTS "idx_{clean_table}_{pk_col}" ON "{clean_table}" ("{pk_col}")')
             except Exception:
                 pass
 
