@@ -13,9 +13,9 @@ const AlertsCenter = lazy(() => import('./views/AlertsCenter'));
 const SchemaExplorer = lazy(() => import('./views/SchemaExplorer'));
 const UserManagement = lazy(() => import('./views/UserManagement'));
 const CopilotDrawer = lazy(() => import('./components/CopilotDrawer'));
-const WorkspaceModal = lazy(() => import('./components/WorkspaceModal'));
 const DatabaseConnector = lazy(() => import('./components/DatabaseConnector'));
 const CustomerStudio = lazy(() => import('./views/CustomerStudio'));
+const CampaignStudio = lazy(() => import('./views/CampaignStudio'));
 
 function StudioLoadingFallback({ label = "Loading Studio..." }) {
   return (
@@ -329,6 +329,14 @@ export default function App() {
           {activeTab === 'customers' && (
             <Suspense fallback={<StudioLoadingFallback label="Loading Customer 360 & Growth Studio..." />}>
               <CustomerStudio 
+                tables={tables} 
+              />
+            </Suspense>
+          )}
+
+          {activeTab === 'campaigns' && (
+            <Suspense fallback={<StudioLoadingFallback label="Loading Marketing Campaign Studio..." />}>
+              <CampaignStudio 
                 tables={tables} 
               />
             </Suspense>

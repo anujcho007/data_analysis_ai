@@ -8,7 +8,7 @@ from app.models.dataset import DatasetMetadata
 from app.models.alert import AlertRule, AlertHistory
 from app.models.workspace import Workspace, WorkspaceMember
 from app.models.connector import DatabaseConnection
-from app.routers import users, upload, tables, auth, predictive, reports, alerts, workspaces, connectors, copilot, customers
+from app.routers import users, upload, tables, auth, predictive, reports, alerts, workspaces, connectors, copilot, customers, campaigns
 
 # Initialize database tables
 Base.metadata.create_all(bind=engine)
@@ -74,6 +74,7 @@ app.include_router(workspaces.router)
 app.include_router(connectors.router)
 app.include_router(copilot.router)
 app.include_router(customers.router)
+app.include_router(campaigns.router)
 
 @app.get("/health", tags=["System"])
 def health_check():

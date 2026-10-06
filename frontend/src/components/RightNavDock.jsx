@@ -14,7 +14,8 @@ import {
   ChevronLeft,
   X,
   Compass,
-  ArrowRight
+  ArrowRight,
+  Megaphone
 } from 'lucide-react';
 
 export default function RightNavDock({
@@ -62,6 +63,14 @@ export default function RightNavDock({
       icon: UserCheck,
       badge: 'Growth',
       color: '#0d9488'
+    },
+    { 
+      id: 'campaigns', 
+      label: 'Campaign Studio', 
+      desc: 'Marketing attribution & Power BI', 
+      icon: Megaphone,
+      badge: 'Attribution',
+      color: '#e11d48'
     },
     { 
       id: 'alerts', 

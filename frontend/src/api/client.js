@@ -635,3 +635,23 @@ export async function fetchCohortRetention(params) {
   return handleResponse(res, 'Failed to compute cohort retention matrix');
 }
 
+// ==========================================
+// Marketing & Campaign BI Studio APIs
+// ==========================================
+
+export async function fetchCampaignCandidates() {
+  const res = await fetch(`${API_BASE}/campaigns/candidates`, {
+    headers: getAuthHeaders(),
+  });
+  return handleResponse(res, 'Failed to fetch campaign table candidates');
+}
+
+export async function fetchCampaignAnalytics(params = {}) {
+  const res = await fetch(`${API_BASE}/campaigns/analytics`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(params),
+  });
+  return handleResponse(res, 'Failed to compute campaign analytics');
+}
+
