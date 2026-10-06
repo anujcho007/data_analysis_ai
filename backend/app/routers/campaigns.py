@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 import pandas as pd
@@ -9,7 +9,8 @@ from app.services.campaign_intelligence import (
     find_marketing_candidate_tables,
     generate_default_marketing_data,
     compute_campaign_analytics,
-    detect_marketing_columns
+    detect_marketing_columns,
+    RESERVED_TABLES
 )
 
 router = APIRouter(prefix="/api/campaigns", tags=["Marketing & Campaign Studio"])
@@ -20,6 +21,7 @@ class CampaignAnalyticsRequest(BaseModel):
     campaign: Optional[str] = "All"
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    col_mapping: Optional[Dict[str, Optional[str]]] = None
 
 @router.get("/candidates")
 def get_campaign_candidates(current_user: User = Depends(get_current_user)):
@@ -44,31 +46,41 @@ def get_campaign_analytics(
     filtered by channel, campaign, and date range.
     """
     df = None
-    col_mapping = None
+    col_mapping = req.col_mapping
+    is_custom = False
 
     if req.table_name and req.table_name != "benchmark_demo":
+        if req.table_name in RESERVED_TABLES:
+            raise HTTPException(status_code=403, detail=f"Access to internal system table '{req.table_name}' is forbidden.")
+
         try:
-            # Query custom table from warehouse
-            df = pd.read_sql(f"SELECT * FROM \"{req.table_name}\"", con=engine)
+            # Query custom table with limit to handle 1M+ row datasets smoothly
+            df = pd.read_sql(f"SELECT * FROM \"{req.table_name}\" LIMIT 50000", con=engine)
             if df.empty:
-                raise ValueError("Selected table is empty.")
-            col_mapping = detect_marketing_columns(df)
+                raise HTTPException(status_code=400, detail=f"Table '{req.table_name}' contains no records.")
+            
+            if not col_mapping:
+                col_mapping = detect_marketing_columns(df)
+            is_custom = True
+        except HTTPException:
+            raise
         except Exception as e:
-            # Fallback to default demo if error loading custom table
-            df = generate_default_marketing_data()
-            col_mapping = None
+            raise HTTPException(status_code=400, detail=f"Failed to query table '{req.table_name}': {str(e)}")
     else:
-        # Use default benchmark dataset
         df = generate_default_marketing_data()
         col_mapping = None
 
-    analytics = compute_campaign_analytics(
-        df=df,
-        col_mapping=col_mapping,
-        channel_filter=req.channel,
-        campaign_filter=req.campaign,
-        start_date=req.start_date,
-        end_date=req.end_date
-    )
-
-    return analytics
+    try:
+        analytics = compute_campaign_analytics(
+            df=df,
+            col_mapping=col_mapping,
+            channel_filter=req.channel,
+            campaign_filter=req.campaign,
+            start_date=req.start_date,
+            end_date=req.end_date
+        )
+        analytics['is_custom_table'] = is_custom
+        analytics['source_table'] = req.table_name or "benchmark_demo"
+        return analytics
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Analytics computation failed: {str(e)}")

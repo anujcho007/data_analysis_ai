@@ -543,12 +543,24 @@ export default function CampaignStudio({ tables = [] }) {
   const [startDate, setStartDate] = useState('2023-03-01');
   const [endDate, setEndDate] = useState('2023-11-30');
 
+  const [isMappingOpen, setIsMappingOpen] = useState(false);
+  const [colMapping, setColMapping] = useState({
+    channel_col: '',
+    campaign_col: '',
+    date_col: '',
+    impressions_col: '',
+    clicks_col: '',
+    cost_col: '',
+    conversions_col: '',
+    profit_col: ''
+  });
+
   const [analytics, setAnalytics] = useState(null);
   const [candidates, setCandidates] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Load initial candidates
+  // Load initial candidate tables from warehouse
   useEffect(() => {
     const loadCandidates = async () => {
       try {
@@ -563,19 +575,68 @@ export default function CampaignStudio({ tables = [] }) {
     loadCandidates();
   }, [tables.length]);
 
-  // Load analytics when filters change
-  const loadAnalytics = async () => {
+  // Merge backend candidate metadata with any client tables
+  const displayTables = useMemo(() => {
+    const map = new Map();
+    candidates.forEach(c => map.set(c.table_name, c));
+    tables.forEach(t => {
+      if (!map.has(t.table_name)) {
+        map.set(t.table_name, {
+          table_name: t.table_name,
+          row_count: t.row_count || 0,
+          is_campaign_ready: false,
+          available_columns: [],
+          columns: {}
+        });
+      }
+    });
+    return Array.from(map.values());
+  }, [candidates, tables]);
+
+  const activeTableMeta = useMemo(() => {
+    return displayTables.find(c => c.table_name === selectedTable);
+  }, [displayTables, selectedTable]);
+
+  // Load analytics when filters or selection changes
+  const loadAnalytics = async (customMap = null) => {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await fetchCampaignAnalytics({
+      const activeMap = customMap || (selectedTable !== 'benchmark_demo' ? colMapping : null);
+      const payload = {
         table_name: selectedTable,
         channel: channelFilter,
         campaign: campaignFilter,
-        start_date: startDate,
-        end_date: endDate
-      });
+        start_date: startDate || undefined,
+        end_date: endDate || undefined,
+        col_mapping: activeMap && Object.values(activeMap).some(Boolean) ? activeMap : undefined
+      };
+      const data = await fetchCampaignAnalytics(payload);
       setAnalytics(data);
+
+      // Auto-sync table date range if using a warehouse dataset and default 2023 dates were preset
+      if (selectedTable !== 'benchmark_demo' && data?.filters?.min_date && data?.filters?.max_date) {
+        if (!startDate || startDate === '2023-03-01') {
+          setStartDate(data.filters.min_date);
+        }
+        if (!endDate || endDate === '2023-11-30') {
+          setEndDate(data.filters.max_date);
+        }
+      }
+
+      // Sync active mapping state if returned
+      if (data?.active_mapping && selectedTable !== 'benchmark_demo') {
+        setColMapping(prev => ({
+          channel_col: data.active_mapping.channel_col || prev.channel_col || '',
+          campaign_col: data.active_mapping.campaign_col || prev.campaign_col || '',
+          date_col: data.active_mapping.date_col || prev.date_col || '',
+          impressions_col: data.active_mapping.impressions_col || prev.impressions_col || '',
+          clicks_col: data.active_mapping.clicks_col || prev.clicks_col || '',
+          cost_col: data.active_mapping.cost_col || prev.cost_col || '',
+          conversions_col: data.active_mapping.conversions_col || prev.conversions_col || '',
+          profit_col: data.active_mapping.profit_col || prev.profit_col || ''
+        }));
+      }
     } catch (err) {
       setError(err.message || 'Failed to calculate campaign analytics');
     } finally {
@@ -587,21 +648,61 @@ export default function CampaignStudio({ tables = [] }) {
     loadAnalytics();
   }, [selectedTable, channelFilter, campaignFilter, startDate, endDate]);
 
+  const handleTableChange = (newTableName) => {
+    setSelectedTable(newTableName);
+    setError(null);
+    setChannelFilter('All');
+    setCampaignFilter('All');
+
+    if (newTableName === 'benchmark_demo') {
+      setStartDate('2023-03-01');
+      setEndDate('2023-11-30');
+      setIsMappingOpen(false);
+    } else {
+      const meta = displayTables.find(c => c.table_name === newTableName);
+      const cols = meta?.columns || {};
+      const newMap = {
+        channel_col: cols.channel_col || (meta?.available_columns?.find(c => !c.startsWith('col_') && !c.endsWith('_id')) || ''),
+        campaign_col: cols.campaign_col || (meta?.available_columns?.find(c => c.includes('name') || c.includes('item') || c.includes('title')) || ''),
+        date_col: cols.date_col || (meta?.available_columns?.find(c => c.includes('date') || c.includes('time')) || ''),
+        impressions_col: cols.impressions_col || '',
+        clicks_col: cols.clicks_col || '',
+        cost_col: cols.cost_col || '',
+        conversions_col: cols.conversions_col || '',
+        profit_col: cols.profit_col || ''
+      };
+      setColMapping(newMap);
+      setStartDate('');
+      setEndDate('');
+    }
+  };
+
+  const handleApplyMapping = () => {
+    loadAnalytics(colMapping);
+  };
+
   const handleResetFilters = () => {
     setChannelFilter('All');
     setCampaignFilter('All');
-    setStartDate('2023-03-01');
-    setEndDate('2023-11-30');
-    setSelectedTable('benchmark_demo');
+    if (selectedTable === 'benchmark_demo') {
+      setStartDate('2023-03-01');
+      setEndDate('2023-11-30');
+    } else if (analytics?.filters?.min_date && analytics?.filters?.max_date) {
+      setStartDate(analytics.filters.min_date);
+      setEndDate(analytics.filters.max_date);
+    }
   };
 
   const kpis = analytics?.kpis;
   const donuts = analytics?.donuts;
 
+  // Available column options for current table
+  const colOptions = activeTableMeta?.available_columns || (analytics?.filters ? Object.keys(analytics?.filters) : []);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {/* ======================================================== */}
-      {/* 1. Header & Filter Bar (Matching Reference Screenshot)  */}
+      {/* 1. Header & Filter Bar                                   */}
       {/* ======================================================== */}
       <div className="glass-panel" style={{
         background: '#ffffff',
@@ -686,26 +787,56 @@ export default function CampaignStudio({ tables = [] }) {
             <span style={{ fontWeight: '700' }}>Source:</span>
             <select
               value={selectedTable}
-              onChange={(e) => setSelectedTable(e.target.value)}
+              onChange={(e) => handleTableChange(e.target.value)}
               style={{
-                padding: '6px 10px',
+                padding: '6px 12px',
                 borderRadius: '8px',
                 border: '1px solid #cbd5e1',
                 fontSize: '0.76rem',
                 background: '#ffffff',
                 fontWeight: '600',
                 outline: 'none',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                maxWidth: '240px'
               }}
             >
               <option value="benchmark_demo">🌟 Benchmark Campaign Demo</option>
-              {candidates.map(c => (
-                <option key={c.table_name} value={c.table_name}>
-                  📁 {c.table_name} (Warehouse)
-                </option>
-              ))}
+              {displayTables.length > 0 && (
+                <optgroup label="Local SQLite Warehouse Tables">
+                  {displayTables.map(c => (
+                    <option key={c.table_name} value={c.table_name}>
+                      📁 {c.table_name} ({c.row_count ? c.row_count.toLocaleString() : '—'} rows){c.is_campaign_ready ? ' ✨' : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </div>
+
+          {/* Column Mapping Toggle Button (For warehouse tables) */}
+          {selectedTable !== 'benchmark_demo' && (
+            <button
+              onClick={() => setIsMappingOpen(prev => !prev)}
+              style={{
+                padding: '6px 11px',
+                borderRadius: '8px',
+                fontSize: '0.74rem',
+                fontWeight: '700',
+                border: isMappingOpen ? '1px solid #818cf8' : '1px solid #cbd5e1',
+                background: isMappingOpen ? '#e0e7ff' : '#f8fafc',
+                color: isMappingOpen ? '#4338ca' : '#475569',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+              title="Configure which table columns represent channels, metrics, and dates"
+            >
+              <Target size={13} />
+              <span>{isMappingOpen ? 'Hide Columns' : 'Map Columns'}</span>
+            </button>
+          )}
 
           {/* Date Range Inputs */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.76rem', color: '#475569' }}>
@@ -751,7 +882,8 @@ export default function CampaignStudio({ tables = [] }) {
                 background: '#ffffff',
                 fontWeight: '600',
                 outline: 'none',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                maxWidth: '130px'
               }}
             >
               {analytics?.filters?.channels?.map(ch => (
@@ -774,7 +906,8 @@ export default function CampaignStudio({ tables = [] }) {
                 background: '#ffffff',
                 fontWeight: '600',
                 outline: 'none',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                maxWidth: '140px'
               }}
             >
               {analytics?.filters?.campaigns?.map(cp => (
@@ -801,6 +934,322 @@ export default function CampaignStudio({ tables = [] }) {
           </button>
         </div>
       </div>
+
+      {/* ======================================================== */}
+      {/* Warehouse Status Banner (When reading from DB)           */}
+      {/* ======================================================== */}
+      {selectedTable !== 'benchmark_demo' && (
+        <div style={{
+          background: '#f8fafc',
+          border: '1px solid #e2e8f0',
+          borderRadius: '14px',
+          padding: '10px 18px',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px',
+          fontSize: '0.78rem'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: '#10b981',
+              boxShadow: '0 0 8px #10b981'
+            }} />
+            <span style={{ fontWeight: '700', color: '#0f172a' }}>
+              Connected to Warehouse Table:
+            </span>
+            <code style={{ background: '#e2e8f0', padding: '2px 6px', borderRadius: '4px', fontWeight: '700' }}>
+              {selectedTable}
+            </code>
+            {activeTableMeta?.row_count ? (
+              <span style={{ color: '#64748b' }}>({activeTableMeta.row_count.toLocaleString()} rows)</span>
+            ) : null}
+            <span style={{ color: '#94a3b8' }}>•</span>
+            <span style={{ color: '#475569' }}>
+              Channel: <strong style={{ color: '#4f46e5' }}>{colMapping.channel_col || 'auto'}</strong>
+            </span>
+            <span style={{ color: '#94a3b8' }}>•</span>
+            <span style={{ color: '#475569' }}>
+              Metric / Cost: <strong style={{ color: '#0284c7' }}>{colMapping.cost_col || colMapping.profit_col || 'auto'}</strong>
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              onClick={() => setIsMappingOpen(prev => !prev)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#4f46e5',
+                fontWeight: '700',
+                cursor: 'pointer',
+                fontSize: '0.78rem'
+              }}
+            >
+              {isMappingOpen ? 'Close Column Mapper' : 'Change Column Mapping ⚙️'}
+            </button>
+            <span style={{ color: '#cbd5e1' }}>|</span>
+            <button
+              onClick={() => handleTableChange('benchmark_demo')}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#64748b',
+                fontWeight: '600',
+                cursor: 'pointer',
+                fontSize: '0.78rem'
+              }}
+            >
+              Switch back to Demo Preset
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* Expandable Column Mapping Bar                            */}
+      {/* ======================================================== */}
+      {isMappingOpen && selectedTable !== 'benchmark_demo' && (
+        <div className="glass-panel" style={{
+          background: '#ffffff',
+          borderRadius: '16px',
+          border: '1px solid #c7d2fe',
+          padding: '16px 20px',
+          boxShadow: '0 4px 18px -2px rgba(99, 102, 241, 0.08)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '14px',
+          animation: 'fadeIn 0.2s ease-out'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Target size={16} color="#4f46e5" />
+              <span style={{ fontSize: '0.86rem', fontWeight: '800', color: '#1e293b' }}>
+                Column Mapping Configuration for "{selectedTable}"
+              </span>
+            </div>
+            <span style={{ fontSize: '0.74rem', color: '#64748b' }}>
+              Map your table's columns to marketing & business dimensions
+            </span>
+          </div>
+
+          {/* Dropdown Grid */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+            gap: '12px'
+          }}>
+            {/* Channel / Dimension */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '0.72rem', fontWeight: '700', color: '#475569' }}>
+                Channel / Category (Breakdown)
+              </label>
+              <select
+                value={colMapping.channel_col}
+                onChange={(e) => setColMapping(prev => ({ ...prev, channel_col: e.target.value }))}
+                style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.76rem', background: '#f8fafc' }}
+              >
+                <option value="">(Auto-detect)</option>
+                {colOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+
+            {/* Campaign / Entity */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '0.72rem', fontWeight: '700', color: '#475569' }}>
+                Campaign / Item Name
+              </label>
+              <select
+                value={colMapping.campaign_col}
+                onChange={(e) => setColMapping(prev => ({ ...prev, campaign_col: e.target.value }))}
+                style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.76rem', background: '#f8fafc' }}
+              >
+                <option value="">(Auto-detect)</option>
+                {colOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+
+            {/* Date Column */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '0.72rem', fontWeight: '700', color: '#475569' }}>
+                Date / Timestamp
+              </label>
+              <select
+                value={colMapping.date_col}
+                onChange={(e) => setColMapping(prev => ({ ...prev, date_col: e.target.value }))}
+                style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.76rem', background: '#f8fafc' }}
+              >
+                <option value="">(Auto-detect or Sequential)</option>
+                {colOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+
+            {/* Impressions / Volume */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '0.72rem', fontWeight: '700', color: '#475569' }}>
+                Impressions / Volume / Qty
+              </label>
+              <select
+                value={colMapping.impressions_col}
+                onChange={(e) => setColMapping(prev => ({ ...prev, impressions_col: e.target.value }))}
+                style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.76rem', background: '#f8fafc' }}
+              >
+                <option value="">(Auto-detect / Derived)</option>
+                {colOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+
+            {/* Clicks / Engagement */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '0.72rem', fontWeight: '700', color: '#475569' }}>
+                Clicks / Engagement / Rating
+              </label>
+              <select
+                value={colMapping.clicks_col}
+                onChange={(e) => setColMapping(prev => ({ ...prev, clicks_col: e.target.value }))}
+                style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.76rem', background: '#f8fafc' }}
+              >
+                <option value="">(Auto-detect / Derived)</option>
+                {colOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+
+            {/* Cost / Spend */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '0.72rem', fontWeight: '700', color: '#475569' }}>
+                Cost / Price / Spend ($)
+              </label>
+              <select
+                value={colMapping.cost_col}
+                onChange={(e) => setColMapping(prev => ({ ...prev, cost_col: e.target.value }))}
+                style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.76rem', background: '#f8fafc' }}
+              >
+                <option value="">(Auto-detect / Derived)</option>
+                {colOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+
+            {/* Conversions / Orders */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '0.72rem', fontWeight: '700', color: '#475569' }}>
+                Conversions / Orders (Count)
+              </label>
+              <select
+                value={colMapping.conversions_col}
+                onChange={(e) => setColMapping(prev => ({ ...prev, conversions_col: e.target.value }))}
+                style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.76rem', background: '#f8fafc' }}
+              >
+                <option value="">(Auto-detect / Derived)</option>
+                {colOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+
+            {/* Profit / Revenue */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '0.72rem', fontWeight: '700', color: '#475569' }}>
+                Profit / Revenue / Total ($)
+              </label>
+              <select
+                value={colMapping.profit_col}
+                onChange={(e) => setColMapping(prev => ({ ...prev, profit_col: e.target.value }))}
+                style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.76rem', background: '#f8fafc' }}
+              >
+                <option value="">(Auto-detect / Derived)</option>
+                {colOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Action Row */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
+            <button
+              onClick={() => setIsMappingOpen(false)}
+              className="btn btn-secondary"
+              style={{ padding: '6px 14px', fontSize: '0.78rem', borderRadius: '8px' }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleApplyMapping}
+              style={{
+                padding: '6px 18px',
+                borderRadius: '8px',
+                fontSize: '0.78rem',
+                fontWeight: '700',
+                background: 'linear-gradient(135deg, #4f46e5, #06b6d4)',
+                color: '#ffffff',
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 2px 8px rgba(79, 70, 229, 0.3)'
+              }}
+            >
+              <Sparkles size={13} />
+              <span>Apply Mappings & Recalculate</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* Error Alert Display                                      */}
+      {/* ======================================================== */}
+      {error && (
+        <div style={{
+          background: '#fff1f2',
+          border: '1px solid #fecdd3',
+          borderRadius: '14px',
+          padding: '12px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px',
+          color: '#be123c',
+          fontSize: '0.84rem'
+        }}>
+          <div>
+            <strong>Unable to calculate analytics:</strong> {error}
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={() => setIsMappingOpen(true)}
+              style={{
+                padding: '4px 12px',
+                borderRadius: '6px',
+                background: '#ffffff',
+                border: '1px solid #f43f5e',
+                color: '#e11d48',
+                fontSize: '0.75rem',
+                fontWeight: '700',
+                cursor: 'pointer'
+              }}
+            >
+              Adjust Columns
+            </button>
+            <button
+              onClick={() => handleTableChange('benchmark_demo')}
+              style={{
+                padding: '4px 12px',
+                borderRadius: '6px',
+                background: '#e11d48',
+                color: '#ffffff',
+                border: 'none',
+                fontSize: '0.75rem',
+                fontWeight: '700',
+                cursor: 'pointer'
+              }}
+            >
+              Load Demo Benchmark
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ======================================================== */}
       {/* 2. Main Executive Grid Canvas                            */}

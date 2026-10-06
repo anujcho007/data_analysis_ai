@@ -6,14 +6,43 @@ import numpy as np
 from sqlalchemy import text
 from app.core.database import engine
 
-CHANNEL_KEYWORDS = ('channel', 'platform', 'source', 'publisher', 'media_source', 'network')
-CAMPAIGN_KEYWORDS = ('campaign', 'campaign_name', 'ad_group', 'campaign_id', 'promo')
-DATE_KEYWORDS = ('date', 'day', 'timestamp', 'created_at', 'event_date', 'datetime')
-IMPRESSIONS_KEYWORDS = ('impression', 'impressions', 'impr', 'views', 'ad_views')
-CLICKS_KEYWORDS = ('click', 'clicks', 'visits', 'ad_clicks')
-COST_KEYWORDS = ('cost', 'spend', 'ad_spend', 'expenses', 'amount_spent')
-CONVERSIONS_KEYWORDS = ('conversion', 'conversions', 'orders', 'purchases', 'leads')
-REVENUE_KEYWORDS = ('revenue', 'sales', 'turnover', 'profit', 'margin', 'net_profit')
+RESERVED_TABLES = {
+    'users', 'alert_rules', 'alert_history', 'workspaces', 'workspace_members',
+    'database_connections', 'dataset_metadata', 'sqlite_sequence', 'sqlite_master', 'sqlite_temp_master'
+}
+
+CHANNEL_KEYWORDS = (
+    'channel', 'platform', 'source', 'publisher', 'media_source', 'network',
+    'cuisine', 'category', 'segment', 'type', 'department', 'city', 'country', 'gender', 'role'
+)
+CAMPAIGN_KEYWORDS = (
+    'campaign', 'campaign_name', 'ad_group', 'campaign_id', 'promo',
+    'name', 'product_name', 'item_name', 'item', 'food_name', 'title', 'brand'
+)
+DATE_KEYWORDS = (
+    'date', 'day', 'timestamp', 'created_at', 'event_date', 'datetime',
+    'order_date', 'review_date', 'admission_date', 'visit_date', 'created'
+)
+IMPRESSIONS_KEYWORDS = (
+    'impression', 'impressions', 'impr', 'views', 'ad_views',
+    'quantity', 'qty', 'count', 'rating_count', 'orders_count', 'volume'
+)
+CLICKS_KEYWORDS = (
+    'click', 'clicks', 'visits', 'ad_clicks',
+    'rating', 'score', 'stars', 'engagement', 'likes'
+)
+COST_KEYWORDS = (
+    'cost', 'spend', 'ad_spend', 'expenses', 'amount_spent',
+    'price', 'unit_price', 'amount', 'fee', 'charge', 'rate'
+)
+CONVERSIONS_KEYWORDS = (
+    'conversion', 'conversions', 'orders', 'purchases', 'leads',
+    'transactions', 'items_sold', 'order_id', 'review_id', 'customer_id'
+)
+REVENUE_KEYWORDS = (
+    'revenue', 'sales', 'turnover', 'profit', 'margin', 'net_profit',
+    'monthly_income', 'total_amount', 'total', 'subtotal', 'income'
+)
 
 CHANNEL_COLORS = {
     'Facebook': '#3b82f6',
@@ -23,6 +52,33 @@ CHANNEL_COLORS = {
     'TikTok': '#8b5cf6',
     'Other': '#64748b'
 }
+
+VIBRANT_PALETTE = [
+    '#3b82f6', '#f97316', '#10b981', '#8b5cf6', '#ef4444', 
+    '#0284c7', '#ec4899', '#f59e0b', '#0d9488', '#6366f1',
+    '#14b8a6', '#e11d48', '#84cc16', '#a855f7', '#06b6d4'
+]
+
+def get_channel_color(name: str, idx: int = 0) -> str:
+    if name in CHANNEL_COLORS:
+        return CHANNEL_COLORS[name]
+    return VIBRANT_PALETTE[idx % len(VIBRANT_PALETTE)]
+
+def format_compact_metric(val: float, is_currency: bool = False) -> str:
+    if val is None or math.isnan(val):
+        return "$0" if is_currency else "0"
+    prefix = "$" if is_currency else ""
+    abs_v = abs(val)
+    sign = "-" if val < 0 else ""
+    if abs_v >= 1_000_000_000:
+        return f"{sign}{prefix}{abs_v / 1_000_000_000:.2f}B"
+    if abs_v >= 1_000_000:
+        return f"{sign}{prefix}{abs_v / 1_000_000:.2f}M"
+    if abs_v >= 1_000:
+        return f"{sign}{prefix}{abs_v / 1_000:.1f}K"
+    if isinstance(val, int) or (isinstance(val, float) and val.is_integer()):
+        return f"{sign}{prefix}{int(abs_v):,}"
+    return f"{sign}{prefix}{abs_v:,.2f}"
 
 def generate_default_marketing_data() -> pd.DataFrame:
     """
@@ -56,7 +112,6 @@ def generate_default_marketing_data() -> pd.DataFrame:
         month = current_date.month
         day_of_week = current_date.strftime('%A')
         
-        # Season identification
         if month in [3, 4, 5]:
             season = 'Spring'
             campaign = 'Spring Push'
@@ -70,7 +125,6 @@ def generate_default_marketing_data() -> pd.DataFrame:
             campaign = 'Fall Launch'
             season_factor = 1.15
 
-        # Day of week factor (slight variations)
         dow_factor = 1.0 + (0.04 if day_of_week in ['Wednesday', 'Thursday', 'Sunday'] else -0.02)
 
         for channel in channels:
@@ -103,6 +157,19 @@ def generate_default_marketing_data() -> pd.DataFrame:
 
     return pd.DataFrame(records)
 
+def is_numeric_or_currency(df: pd.DataFrame, col: str) -> bool:
+    if col not in df.columns:
+        return False
+    series = df[col]
+    if pd.api.types.is_numeric_dtype(series):
+        return True
+    if series.dtype == object or pd.api.types.is_string_dtype(series):
+        sample = series.dropna().head(20).astype(str).str.replace(r'[^\d.-]', '', regex=True)
+        if len(sample) == 0:
+            return False
+        converted = pd.to_numeric(sample, errors='coerce')
+        return converted.notna().sum() >= max(1, int(len(sample) * 0.5))
+    return False
 
 def detect_marketing_columns(df: pd.DataFrame) -> Dict[str, Optional[str]]:
     """
@@ -111,60 +178,120 @@ def detect_marketing_columns(df: pd.DataFrame) -> Dict[str, Optional[str]]:
     cols = list(df.columns)
     cols_lower = [str(c).lower() for c in cols]
 
-    def find_match(keywords: tuple, numeric_required: bool = False) -> Optional[str]:
+    def find_match(keywords: tuple, numeric_required: bool = False, exclude: list = None) -> Optional[str]:
+        exclude_set = set(exclude or [])
+        # 1. Exact or suffix/prefix matches
         for c, cl in zip(cols, cols_lower):
-            if any(kw == cl or cl.endswith(f'_{kw}') or cl.startswith(f'{kw}_') or kw in cl for kw in keywords):
+            if c in exclude_set:
+                continue
+            if numeric_required and (cl == 'id' or cl.endswith('_id') or cl.startswith('col_') or 'lic_no' in cl):
+                continue
+            if any(kw == cl or cl.endswith(f'_{kw}') or cl.startswith(f'{kw}_') for kw in keywords):
                 if numeric_required:
-                    if hasattr(df[c], 'dtype') and pd.api.types.is_numeric_dtype(df[c]):
+                    if is_numeric_or_currency(df, c):
+                        return c
+                else:
+                    return c
+        # 2. General substring matches
+        for c, cl in zip(cols, cols_lower):
+            if c in exclude_set:
+                continue
+            if numeric_required and (cl == 'id' or cl.endswith('_id') or cl.startswith('col_') or 'lic_no' in cl):
+                continue
+            if any(kw in cl for kw in keywords):
+                if numeric_required:
+                    if is_numeric_or_currency(df, c):
                         return c
                 else:
                     return c
         return None
 
-    return {
-        'channel_col': find_match(CHANNEL_KEYWORDS),
-        'campaign_col': find_match(CAMPAIGN_KEYWORDS),
-        'date_col': find_match(DATE_KEYWORDS),
-        'impressions_col': find_match(IMPRESSIONS_KEYWORDS, numeric_required=True),
-        'clicks_col': find_match(CLICKS_KEYWORDS, numeric_required=True),
-        'cost_col': find_match(COST_KEYWORDS, numeric_required=True),
-        'conversions_col': find_match(CONVERSIONS_KEYWORDS, numeric_required=True),
-        'profit_col': find_match(REVENUE_KEYWORDS, numeric_required=True),
-    }
+    channel = find_match(CHANNEL_KEYWORDS)
+    campaign = find_match(CAMPAIGN_KEYWORDS, exclude=[channel] if channel else None)
+    date_col = find_match(DATE_KEYWORDS)
+    cost = find_match(COST_KEYWORDS, numeric_required=True)
+    profit = find_match(REVENUE_KEYWORDS, numeric_required=True, exclude=[cost] if cost else None)
+    impr = find_match(IMPRESSIONS_KEYWORDS, numeric_required=True, exclude=[cost, profit])
+    clicks = find_match(CLICKS_KEYWORDS, numeric_required=True, exclude=[impr, cost, profit])
+    conv = find_match(CONVERSIONS_KEYWORDS, numeric_required=True, exclude=[clicks, impr, cost, profit])
 
+    # Fallbacks for general business tables
+    if not channel:
+        for c in cols:
+            cl = str(c).lower()
+            if c not in [date_col, cost, profit, impr, clicks, conv] and not pd.api.types.is_numeric_dtype(df[c]) and not cl.startswith('col_') and not cl.endswith('_id'):
+                channel = c
+                break
+
+    numeric_cols = [
+        c for c in cols 
+        if is_numeric_or_currency(df, c)
+        and str(c).lower() not in ['id', 'col_', 'lic_no'] 
+        and not str(c).lower().endswith('_id') 
+        and not str(c).startswith('col_')
+    ]
+    if not profit and numeric_cols:
+        profit = numeric_cols[0]
+    if not cost and len(numeric_cols) > 1:
+        cost = numeric_cols[1]
+    if not impr and len(numeric_cols) > 2:
+        impr = numeric_cols[2]
+
+    return {
+        'channel_col': channel,
+        'campaign_col': campaign,
+        'date_col': date_col,
+        'impressions_col': impr,
+        'clicks_col': clicks,
+        'cost_col': cost,
+        'conversions_col': conv,
+        'profit_col': profit,
+    }
 
 def find_marketing_candidate_tables() -> List[Dict[str, Any]]:
     """
-    Scans the SQLite warehouse for tables with marketing or campaign characteristics.
+    Scans the SQLite warehouse for all user tables, detects marketing/business attributes,
+    and returns rich column schema metadata for custom mapping.
     """
     candidates = []
     try:
         with engine.connect() as conn:
             result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"))
-            tables = [row[0] for row in result.fetchall()]
+            tables = [row[0] for row in result.fetchall() if row[0] not in RESERVED_TABLES]
 
         for tbl in tables:
             try:
-                sample_df = pd.read_sql(f"SELECT * FROM \"{tbl}\" LIMIT 5", con=engine)
+                sample_df = pd.read_sql(f"SELECT * FROM \"{tbl}\" LIMIT 20", con=engine)
+                all_cols = list(sample_df.columns)
+                num_cols = [c for c in all_cols if pd.api.types.is_numeric_dtype(sample_df[c])]
+                
+                with engine.connect() as conn:
+                    cnt_res = conn.execute(text(f"SELECT COUNT(*) FROM \"{tbl}\"")).fetchone()
+                    row_cnt = cnt_res[0] if cnt_res else len(sample_df)
+
                 mapping = detect_marketing_columns(sample_df)
                 has_channel = mapping['channel_col'] is not None
-                has_metrics = any([mapping['impressions_col'], mapping['clicks_col'], mapping['cost_col']])
+                has_metrics = any([mapping['impressions_col'], mapping['clicks_col'], mapping['cost_col'], mapping['profit_col']])
                 
-                score = (1 if has_channel else 0) + (1 if mapping['date_col'] else 0) + (2 if has_metrics else 0)
-                if score >= 2 or 'campaign' in tbl.lower() or 'marketing' in tbl.lower() or 'ads' in tbl.lower():
-                    candidates.append({
-                        'table_name': tbl,
-                        'score': score,
-                        'columns': mapping
-                    })
+                score = (2 if has_channel else 0) + (1 if mapping['date_col'] else 0) + (2 if has_metrics else 0)
+                is_ready = score >= 3 or any(kw in tbl.lower() for kw in ['campaign', 'marketing', 'ad', 'restaurant', 'order', 'sale'])
+                
+                candidates.append({
+                    'table_name': tbl,
+                    'row_count': row_cnt,
+                    'score': score,
+                    'is_campaign_ready': is_ready,
+                    'columns': mapping,
+                    'available_columns': all_cols,
+                    'numeric_columns': num_cols
+                })
             except Exception:
                 continue
     except Exception:
         pass
 
-    candidates.sort(key=lambda x: x['score'], reverse=True)
+    candidates.sort(key=lambda x: (x['is_campaign_ready'], x['score'], x['row_count']), reverse=True)
     return candidates
-
 
 def compute_campaign_analytics(
     df: pd.DataFrame,
@@ -190,46 +317,78 @@ def compute_campaign_analytics(
     conv_col = col_mapping.get('conversions_col') or 'conversions'
     profit_col = col_mapping.get('profit_col') or 'profit'
 
-    # Ensure required columns exist in df
     working_df = df.copy()
-    for col, default_val in [
-        (channel_col, 'Other'),
-        (campaign_col, 'Default Campaign'),
-        (impr_col, 0),
-        (clicks_col, 0),
-        (cost_col, 0.0),
-        (conv_col, 0),
-        (profit_col, 0.0)
-    ]:
-        if col not in working_df.columns:
-            working_df[col] = default_val
 
-    # Date parsing
-    if date_col in working_df.columns:
+    # Fallbacks and synthesize derived metrics if missing in custom datasets
+    if channel_col not in working_df.columns:
+        working_df[channel_col] = 'All Channels'
+    if campaign_col not in working_df.columns:
+        working_df[campaign_col] = 'Default Campaign'
+
+    # Ensure numeric columns are properly coerced from raw numbers or formatted strings ($250, ₹ 200, 50+ ratings)
+    for c in [impr_col, clicks_col, cost_col, conv_col, profit_col]:
+        if c in working_df.columns:
+            if working_df[c].dtype == object or pd.api.types.is_string_dtype(working_df[c]):
+                cleaned_numeric = working_df[c].astype(str).str.extract(r'(\d+(?:\.\d+)?)')[0]
+                working_df[c] = pd.to_numeric(cleaned_numeric, errors='coerce').fillna(0)
+            else:
+                working_df[c] = pd.to_numeric(working_df[c], errors='coerce').fillna(0)
+
+    if profit_col not in working_df.columns:
+        working_df[profit_col] = 100.0
+    if cost_col not in working_df.columns:
+        working_df[cost_col] = (working_df[profit_col] * 0.2).round(2)
+    if impr_col not in working_df.columns:
+        working_df[impr_col] = 1000
+    if clicks_col not in working_df.columns or working_df[clicks_col].sum() == 0:
+        working_df['derived_clicks'] = (working_df[impr_col] * 0.025).round().clip(lower=1)
+        clicks_col = 'derived_clicks'
+    if conv_col not in working_df.columns or working_df[conv_col].sum() == 0:
+        working_df['derived_conv'] = (working_df[clicks_col] * 0.20).round().clip(lower=1)
+        conv_col = 'derived_conv'
+
+    # Date parsing with fallback synthesis
+    has_real_dates = False
+    if date_col in working_df.columns and date_col:
         working_df['parsed_date'] = pd.to_datetime(working_df[date_col], errors='coerce')
+        if working_df['parsed_date'].notna().sum() > 0:
+            has_real_dates = True
+            first_val = working_df['parsed_date'].dropna().min()
+            working_df['parsed_date'] = working_df['parsed_date'].fillna(first_val)
+        else:
+            working_df['parsed_date'] = pd.date_range(start='2024-01-01', periods=len(working_df), freq='D' if len(working_df) > 100 else 'h')
     else:
-        working_df['parsed_date'] = pd.date_range(start='2023-03-01', periods=len(working_df), freq='D')
-
-    working_df = working_df.dropna(subset=['parsed_date'])
+        working_df['parsed_date'] = pd.date_range(start='2024-01-01', periods=len(working_df), freq='D' if len(working_df) > 100 else 'h')
 
     # Available filter metadata before applying filters
-    all_channels = sorted([str(c) for c in working_df[channel_col].dropna().unique()])
-    all_campaigns = sorted([str(c) for c in working_df[campaign_col].dropna().unique()])
+    all_channels = sorted([str(c) for c in working_df[channel_col].dropna().unique() if str(c).strip()])
+    all_campaigns = sorted([str(c) for c in working_df[campaign_col].dropna().unique() if str(c).strip()])[:50]
     min_date = working_df['parsed_date'].min().strftime('%Y-%m-%d')
     max_date = working_df['parsed_date'].max().strftime('%Y-%m-%d')
 
     # Apply Filters
     filtered_df = working_df.copy()
     if channel_filter and channel_filter != "All":
-        filtered_df = filtered_df[filtered_df[channel_col] == channel_filter]
+        filtered_df = filtered_df[filtered_df[channel_col].astype(str) == str(channel_filter)]
     if campaign_filter and campaign_filter != "All":
-        filtered_df = filtered_df[filtered_df[campaign_col] == campaign_filter]
+        filtered_df = filtered_df[filtered_df[campaign_col].astype(str) == str(campaign_filter)]
+    
+    # Apply date filters only if they fall inside or match the dataset's date envelope
     if start_date:
-        filtered_df = filtered_df[filtered_df['parsed_date'] >= pd.to_datetime(start_date)]
+        try:
+            s_dt = pd.to_datetime(start_date)
+            if s_dt >= pd.to_datetime(min_date):
+                filtered_df = filtered_df[filtered_df['parsed_date'] >= s_dt]
+        except Exception:
+            pass
     if end_date:
-        filtered_df = filtered_df[filtered_df['parsed_date'] <= pd.to_datetime(end_date)]
+        try:
+            e_dt = pd.to_datetime(end_date)
+            if e_dt <= pd.to_datetime(max_date):
+                filtered_df = filtered_df[filtered_df['parsed_date'] <= e_dt]
+        except Exception:
+            pass
 
-    # If completely empty, fallback to working_df
     if filtered_df.empty:
         filtered_df = working_df
 
@@ -244,7 +403,7 @@ def compute_campaign_analytics(
     cost_per_conv = round((total_cost / total_conversions) if total_conversions > 0 else 0, 2)
     profit_per_conv = round((total_profit / total_conversions) if total_conversions > 0 else 0, 2)
 
-    # 2. Sparklines Generation (Divide timeline into 15 uniform bucket samples)
+    # 2. Sparklines Generation (15 buckets across timeline)
     sorted_df = filtered_df.sort_values('parsed_date')
     chunk_size = max(1, math.ceil(len(sorted_df) / 15))
     buckets = [sorted_df.iloc[i:i + chunk_size] for i in range(0, len(sorted_df), chunk_size)]
@@ -263,7 +422,6 @@ def compute_campaign_analytics(
     spark_cost = extract_sparkline(cost_col)
     spark_profit = extract_sparkline(profit_col)
 
-    # Calculate MoM / period comparison percentage
     def calc_delta_pct(spark: List[float]) -> float:
         if len(spark) >= 4:
             first_half = sum(spark[:len(spark)//2])
@@ -280,11 +438,11 @@ def compute_campaign_analytics(
         channel_grp = filtered_df.groupby(channel_col)[metric_col].sum().reset_index()
         total_metric = channel_grp[metric_col].sum()
         results = []
-        for _, row in channel_grp.iterrows():
+        for idx, row in channel_grp.iterrows():
             ch_name = str(row[channel_col])
             val = float(row[metric_col])
             pct = round((val / total_metric * 100) if total_metric > 0 else 0, 2)
-            color = CHANNEL_COLORS.get(ch_name, CHANNEL_COLORS['Other'])
+            color = get_channel_color(ch_name, idx)
             results.append({
                 'channel': ch_name,
                 'value': val,
@@ -292,7 +450,8 @@ def compute_campaign_analytics(
                 'color': color
             })
         results.sort(key=lambda x: x['value'], reverse=True)
-        return results
+        # Limit to top 8 channels for visual clarity
+        return results[:8]
 
     donut_impressions = compute_donut_distribution(impr_col)
     donut_conversions = compute_donut_distribution(conv_col)
@@ -306,7 +465,7 @@ def compute_campaign_analytics(
     }).reset_index()
 
     bar_clicks_ctr = []
-    for _, row in clicks_channel_grp.iterrows():
+    for idx, row in clicks_channel_grp.iterrows():
         ch_name = str(row[channel_col])
         c_val = float(row[clicks_col])
         i_val = float(row[impr_col])
@@ -314,11 +473,12 @@ def compute_campaign_analytics(
         bar_clicks_ctr.append({
             'channel': ch_name,
             'clicks': c_val,
-            'clicks_formatted': f"{round(c_val / 1000, 2)}K" if c_val >= 1000 else str(int(c_val)),
+            'clicks_formatted': format_compact_metric(c_val),
             'ctr_pct': c_ctr,
-            'color': CHANNEL_COLORS.get(ch_name, '#0284c7')
+            'color': get_channel_color(ch_name, idx)
         })
     bar_clicks_ctr.sort(key=lambda x: x['clicks'], reverse=True)
+    bar_clicks_ctr = bar_clicks_ctr[:10]
 
     # 5. Timeline Trend Over Time (Monthly curve with season labels)
     filtered_df['year_month'] = filtered_df['parsed_date'].dt.to_period('M').astype(str)
@@ -335,8 +495,11 @@ def compute_campaign_analytics(
     trend_over_time = []
     for _, row in trend_grp.iterrows():
         month_str = str(row['month_name'])
-        month_idx = datetime.strptime(month_str, '%b').month
-        season = 'Spring' if month_idx in [3, 4, 5] else ('Summer' if month_idx in [6, 7, 8] else 'Fall')
+        try:
+            month_idx = datetime.strptime(month_str, '%b').month
+        except Exception:
+            month_idx = 5
+        season = 'Spring' if month_idx in [3, 4, 5] else ('Summer' if month_idx in [6, 7, 8] else ('Fall' if month_idx in [9, 10, 11] else 'Winter'))
         trend_over_time.append({
             'month': month_str,
             'year_month': str(row['year_month']),
@@ -364,7 +527,7 @@ def compute_campaign_analytics(
         day_of_week_chart.append({
             'day': d_name,
             'impressions': d_impr,
-            'impressions_formatted': f"{round(d_impr / 1_000_000, 2)}M",
+            'impressions_formatted': format_compact_metric(d_impr),
             'ctr_pct': d_ctr
         })
 
@@ -372,31 +535,31 @@ def compute_campaign_analytics(
         'kpis': {
             'impressions': {
                 'value': total_impressions,
-                'formatted': f"{round(total_impressions / 1_000_000, 2)}M",
+                'formatted': format_compact_metric(total_impressions),
                 'compare_pct': impr_delta,
                 'sparkline': spark_impressions
             },
             'clicks': {
                 'value': total_clicks,
-                'formatted': f"{round(total_clicks / 1_000, 2)}K",
+                'formatted': format_compact_metric(total_clicks),
                 'ctr_pct': ctr_pct,
                 'sparkline': spark_clicks
             },
             'conversions': {
                 'value': total_conversions,
-                'formatted': f"{round(total_conversions / 1_000, 1)}K" if total_conversions >= 1000 else str(int(total_conversions)),
+                'formatted': format_compact_metric(total_conversions),
                 'compare_pct': conv_delta,
                 'sparkline': spark_conversions
             },
             'cost': {
                 'value': total_cost,
-                'formatted': f"${round(total_cost / 1_000, 2)}K",
+                'formatted': format_compact_metric(total_cost, is_currency=True),
                 'cost_per_conv': f"${cost_per_conv:.2f}",
                 'sparkline': spark_cost
             },
             'profit': {
                 'value': total_profit,
-                'formatted': f"${round(total_profit / 1_000_000, 2)}M",
+                'formatted': format_compact_metric(total_profit, is_currency=True),
                 'profit_per_conv': f"${profit_per_conv:.2f}",
                 'sparkline': spark_profit
             }
@@ -419,5 +582,16 @@ def compute_campaign_analytics(
             'selected_campaign': campaign_filter,
             'selected_start_date': start_date or min_date,
             'selected_end_date': end_date or max_date
-        }
+        },
+        'active_mapping': {
+            'channel_col': channel_col,
+            'campaign_col': campaign_col,
+            'date_col': date_col,
+            'impressions_col': impr_col,
+            'clicks_col': clicks_col,
+            'cost_col': cost_col,
+            'conversions_col': conv_col,
+            'profit_col': profit_col,
+        },
+        'has_real_dates': has_real_dates
     }
