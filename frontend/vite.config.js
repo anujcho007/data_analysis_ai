@@ -14,5 +14,14 @@ export default defineConfig({
         proxyTimeout: 600000,
       }
     }
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-icons': ['lucide-react']
+        }
+      }
+    }
   }
 })

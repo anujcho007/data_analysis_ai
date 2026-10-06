@@ -72,14 +72,17 @@ def save_dataframe_to_warehouse(
     # Write to SQLite in chunks using the session's active connection
     df.to_sql(table_name, con=conn, if_exists="replace", index=False, chunksize=50000)
 
-    # Automatically index candidate keys to make joins and Star Schema instant
+    # Automatically index candidate keys and temporal columns to make joins and Star Schema instant
     try:
         sanitized_tbl = re.sub(r'[^a-zA-Z0-9_]', '', table_name)
+        temporal_suffixes = ('_date', '_time', '_at', 'timestamp', 'date', 'datetime', 'order_date', 'created_at')
         for col_info in schema_info:
             col_name = col_info.get("name", "")
+            col_l = col_name.lower()
             is_pk = col_info.get("is_unique", False) and col_info.get("null_count", 0) == 0
-            is_key_suffix = col_name.lower().endswith(('_id', '_key', '_code')) or col_name.lower() in ['id', 'pk']
-            if is_pk or is_key_suffix:
+            is_key_suffix = col_l.endswith(('_id', '_key', '_code')) or col_l in ['id', 'pk']
+            is_temporal = any(col_l.endswith(sfx) or col_l == sfx for sfx in temporal_suffixes)
+            if is_pk or is_key_suffix or is_temporal:
                 sanitized_col = re.sub(r'[^a-zA-Z0-9_]', '', col_name)
                 idx_name = f"idx_{sanitized_tbl}_{sanitized_col}"
                 conn.execute(text(f'CREATE INDEX IF NOT EXISTS "{idx_name}" ON "{sanitized_tbl}" ("{sanitized_col}")'))

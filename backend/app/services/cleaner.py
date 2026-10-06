@@ -481,10 +481,13 @@ def stream_clean_large_csv_to_warehouse(
         # Commit per chunk to prevent long-held locks and eliminate "database is locked" errors
         raw_conn.commit()
 
-    # 4. Phase 4: Create indexes on key candidates for high-speed queries & joins
+    # 4. Phase 4: Create indexes on key candidates and temporal columns for high-speed queries & joins
+    temporal_suffixes = ('_date', '_time', '_at', 'timestamp', 'date', 'datetime', 'order_date', 'created_at')
     for col in sample_df.columns:
         col_l = col.lower()
-        if col_l.endswith(('_id', '_key', '_code')) or col_l in ['id', 'pk']:
+        is_key = col_l.endswith(('_id', '_key', '_code')) or col_l in ['id', 'pk']
+        is_temporal = any(col_l.endswith(sfx) or col_l == sfx for sfx in temporal_suffixes)
+        if is_key or is_temporal:
             try:
                 raw_cursor.execute(f'CREATE INDEX IF NOT EXISTS "idx_{clean_table}_{col}" ON "{clean_table}" ("{col}")')
             except Exception:

@@ -1,18 +1,62 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import Navbar from './components/Navbar';
 import Dashboard from './views/Dashboard';
-import AnalyticsDashboard from './views/AnalyticsDashboard';
-import PredictiveStudio from './views/PredictiveStudio';
-import AlertsCenter from './views/AlertsCenter';
 import UploadView from './views/UploadView';
-import SchemaExplorer from './views/SchemaExplorer';
-import UserManagement from './views/UserManagement';
 import LoginView from './views/LoginView';
-import CopilotDrawer from './components/CopilotDrawer';
-import WorkspaceModal from './components/WorkspaceModal';
-import DatabaseConnector from './components/DatabaseConnector';
 import RightNavDock from './components/RightNavDock';
 import FloatingNavTrigger from './components/FloatingNavTrigger';
+
+// Lazy-loaded heavy analytical studios & drawers
+const AnalyticsDashboard = lazy(() => import('./views/AnalyticsDashboard'));
+const PredictiveStudio = lazy(() => import('./views/PredictiveStudio'));
+const AlertsCenter = lazy(() => import('./views/AlertsCenter'));
+const SchemaExplorer = lazy(() => import('./views/SchemaExplorer'));
+const UserManagement = lazy(() => import('./views/UserManagement'));
+const CopilotDrawer = lazy(() => import('./components/CopilotDrawer'));
+const WorkspaceModal = lazy(() => import('./components/WorkspaceModal'));
+const DatabaseConnector = lazy(() => import('./components/DatabaseConnector'));
+
+function StudioLoadingFallback({ label = "Loading Studio..." }) {
+  return (
+    <div style={{
+      minHeight: '380px',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '16px',
+      background: 'rgba(255, 255, 255, 0.7)',
+      backdropFilter: 'blur(8px)',
+      borderRadius: '20px',
+      border: '1px solid #e2e8f0',
+      padding: '40px',
+      boxShadow: '0 4px 20px -2px rgba(15, 23, 42, 0.04)',
+      animation: 'fadeIn 0.2s ease-out'
+    }}>
+      <div style={{
+        width: '44px',
+        height: '44px',
+        borderRadius: '12px',
+        background: 'linear-gradient(135deg, #4f46e5, #06b6d4)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxShadow: '0 8px 20px -4px rgba(79, 70, 229, 0.35)',
+        animation: 'pulse 1.5s infinite'
+      }}>
+        <Loader2 size={22} color="#ffffff" className="spinner" />
+      </div>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: '0.95rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+          {label}
+        </div>
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+          Preparing analytical engines & visualizations...
+        </div>
+      </div>
+    </div>
+  );
+}
 import { 
   fetchStats, 
   fetchTables, 
@@ -265,34 +309,42 @@ export default function App() {
           )}
 
           {activeTab === 'analytics' && (
-            <AnalyticsDashboard 
-              tables={tables} 
-              setActiveTab={setActiveTab} 
-            />
+            <Suspense fallback={<StudioLoadingFallback label="Loading BI Analytics Studio..." />}>
+              <AnalyticsDashboard 
+                tables={tables} 
+                setActiveTab={setActiveTab} 
+              />
+            </Suspense>
           )}
 
           {activeTab === 'predictive' && (
-            <PredictiveStudio 
-              tables={tables} 
-            />
+            <Suspense fallback={<StudioLoadingFallback label="Loading Predictive Intelligence & Digital Twin..." />}>
+              <PredictiveStudio 
+                tables={tables} 
+              />
+            </Suspense>
           )}
 
           {activeTab === 'alerts' && (
-            <AlertsCenter 
-              tables={tables} 
-            />
+            <Suspense fallback={<StudioLoadingFallback label="Loading Anomaly Watchdog & Alerts Center..." />}>
+              <AlertsCenter 
+                tables={tables} 
+              />
+            </Suspense>
           )}
 
           {activeTab === 'connectors' && (
-            <div style={{
-              background: '#ffffff',
-              borderRadius: '20px',
-              border: '1px solid #e2e8f0',
-              padding: '24px',
-              boxShadow: '0 4px 20px -2px rgba(15, 23, 42, 0.05)'
-            }}>
-              <DatabaseConnector onSyncSuccess={handleUploadComplete} />
-            </div>
+            <Suspense fallback={<StudioLoadingFallback label="Loading Live Database Connectors..." />}>
+              <div style={{
+                background: '#ffffff',
+                borderRadius: '20px',
+                border: '1px solid #e2e8f0',
+                padding: '24px',
+                boxShadow: '0 4px 20px -2px rgba(15, 23, 42, 0.05)'
+              }}>
+                <DatabaseConnector onSyncSuccess={handleUploadComplete} />
+              </div>
+            </Suspense>
           )}
 
           {/* Persistent Background UploadView: Never unmounted so uploads, chunk streams, and cleaning continue uninterrupted */}
@@ -305,17 +357,21 @@ export default function App() {
           </div>
 
           {activeTab === 'schema' && (
-            <SchemaExplorer 
-              tables={tables} 
-              onRefresh={loadAllData} 
-            />
+            <Suspense fallback={<StudioLoadingFallback label="Loading Star Schema Explorer & SQL Studio..." />}>
+              <SchemaExplorer 
+                tables={tables} 
+                onRefresh={loadAllData} 
+              />
+            </Suspense>
           )}
 
           {/* User Management is only accessible to admins */}
           {activeTab === 'users' && currentUser?.role === 'admin' && (
-            <UserManagement 
-              onUserChange={loadAllData} 
-            />
+            <Suspense fallback={<StudioLoadingFallback label="Loading User Management Console..." />}>
+              <UserManagement 
+                onUserChange={loadAllData} 
+              />
+            </Suspense>
           )}
 
           {activeTab === 'users' && currentUser?.role !== 'admin' && (
@@ -368,21 +424,29 @@ export default function App() {
       )}
 
       {/* Floating Conversational AI Copilot Drawer */}
-      <CopilotDrawer
-        isOpen={isCopilotOpen}
-        onClose={() => setIsCopilotOpen(false)}
-      />
+      <Suspense fallback={null}>
+        {isCopilotOpen && (
+          <CopilotDrawer
+            isOpen={isCopilotOpen}
+            onClose={() => setIsCopilotOpen(false)}
+          />
+        )}
+      </Suspense>
 
       {/* Multi-Tenant Workspace & Team Portal */}
-      <WorkspaceModal
-        isOpen={isWorkspaceModalOpen}
-        onClose={() => setIsWorkspaceModalOpen(false)}
-        activeWorkspace={activeWorkspace}
-        onWorkspaceChanged={(ws) => {
-          setActiveWorkspace(ws);
-          loadAllData();
-        }}
-      />
+      <Suspense fallback={null}>
+        {isWorkspaceModalOpen && (
+          <WorkspaceModal
+            isOpen={isWorkspaceModalOpen}
+            onClose={() => setIsWorkspaceModalOpen(false)}
+            activeWorkspace={activeWorkspace}
+            onWorkspaceChanged={(ws) => {
+              setActiveWorkspace(ws);
+              loadAllData();
+            }}
+          />
+        )}
+      </Suspense>
 
       {/* Floating Background Upload Progress Pill (visible when user shifts to other tabs) */}
       {uploadStatus.isUploading && activeTab !== 'upload' && (

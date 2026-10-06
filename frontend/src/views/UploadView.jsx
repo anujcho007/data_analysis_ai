@@ -18,8 +18,9 @@ import {
   Globe
 } from 'lucide-react';
 import { uploadFiles, uploadChunk, completeChunkedUpload } from '../api/client';
-import ApiDataFetcher from '../components/ApiDataFetcher';
-import DatabaseConnector from '../components/DatabaseConnector';
+
+const ApiDataFetcher = React.lazy(() => import('../components/ApiDataFetcher'));
+const DatabaseConnector = React.lazy(() => import('../components/DatabaseConnector'));
 
 const CLEANING_STAGES = [
   {
@@ -539,11 +540,18 @@ export default function UploadView({ onUploadComplete, onUploadStateChange, setA
         </button>
       </div>
 
-      {ingestionTab === 'api' ? (
-        <ApiDataFetcher onIngestionComplete={onUploadComplete} setActiveTab={setActiveTab} />
-      ) : ingestionTab === 'sql' ? (
-        <DatabaseConnector onSyncSuccess={onUploadComplete} />
-      ) : (
+      <React.Suspense fallback={
+        <div style={{ padding: '60px', textAlign: 'center', color: '#64748b', fontSize: '0.9rem', fontWeight: '600' }}>
+          Loading connection interface...
+        </div>
+      }>
+        {ingestionTab === 'api' ? (
+          <ApiDataFetcher onIngestionComplete={onUploadComplete} setActiveTab={setActiveTab} />
+        ) : ingestionTab === 'sql' ? (
+          <DatabaseConnector onSyncSuccess={onUploadComplete} />
+        ) : null}
+      </React.Suspense>
+      {ingestionTab === 'csv' && (
         <>
       {/* Pipeline Progress Visualizer Card (active during upload or shown on 100% completion) */}
       {(isUploading || overallProgress > 0) && (
