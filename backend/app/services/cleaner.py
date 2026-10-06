@@ -299,7 +299,7 @@ def stream_clean_large_csv_to_warehouse(
     file_path: Path,
     table_name: str,
     original_filename: str,
-    db: Session,
+    db: Optional[Session] = None,
     drop_duplicates: bool = True,
     fill_nulls: bool = True,
     numeric_strategy: str = "median",
@@ -401,18 +401,25 @@ def stream_clean_large_csv_to_warehouse(
     # 2. Phase 2: Prepare SQLite connection and table
     clean_table = "".join(c for c in table_name if c.isalnum() or c == "_")
     
-    # Commit any active transaction in SQLAlchemy session so the database file is unlocked
-    db.commit()
+    # Release any active SQLAlchemy pool connections so the SQLite file is completely unlocked on Windows
+    if db is not None:
+        try:
+            db.commit()
+            db.close()
+        except Exception:
+            pass
+    from app.core.database import engine
+    engine.dispose()
 
     import sqlite3
     from app.config import DB_PATH
 
-    raw_conn = sqlite3.connect(DB_PATH.as_posix(), timeout=60.0)
+    raw_conn = sqlite3.connect(DB_PATH.as_posix(), timeout=120.0)
     try:
-        raw_conn.execute("PRAGMA busy_timeout = 60000")
+        raw_conn.execute("PRAGMA busy_timeout = 120000")
         raw_conn.execute("PRAGMA journal_mode = WAL")
         raw_conn.execute("PRAGMA synchronous = NORMAL")
-        raw_conn.execute("PRAGMA cache_size = -128000")
+        raw_conn.execute("PRAGMA cache_size = -256000")
         raw_conn.execute("PRAGMA temp_store = MEMORY")
         raw_conn.execute("PRAGMA mmap_size = 30000000000")
     except Exception:
@@ -529,26 +536,30 @@ def stream_clean_large_csv_to_warehouse(
     is_fact = any(any(kw in c.lower() for kw in fact_keywords) for c in sample_df.columns)
     table_type = "fact" if is_fact else "dimension"
 
-    metadata = db.query(DatasetMetadata).filter(DatasetMetadata.table_name == clean_table).first()
-    if not metadata:
-        metadata = DatasetMetadata(
-            table_name=clean_table,
-            original_filename=original_filename,
-            row_count=total_rows,
-            column_count=len(sample_df.columns),
-            table_type=table_type,
-            schema_json=json.dumps(schema_info),
-            cleaning_summary_json=json.dumps(cleaning_summary)
-        )
-        db.add(metadata)
-    else:
-        metadata.original_filename = original_filename
-        metadata.row_count = total_rows
-        metadata.column_count = len(sample_df.columns)
-        metadata.table_type = table_type
-        metadata.schema_json = json.dumps(schema_info)
-        metadata.cleaning_summary_json = json.dumps(cleaning_summary)
+    from app.core.database import SessionLocal
+    with SessionLocal() as meta_session:
+        metadata = meta_session.query(DatasetMetadata).filter(DatasetMetadata.table_name == clean_table).first()
+        if not metadata:
+            metadata = DatasetMetadata(
+                table_name=clean_table,
+                original_filename=original_filename,
+                row_count=total_rows,
+                column_count=len(sample_df.columns),
+                table_type=table_type,
+                schema_json=json.dumps(schema_info),
+                cleaning_summary_json=json.dumps(cleaning_summary)
+            )
+            meta_session.add(metadata)
+        else:
+            metadata.original_filename = original_filename
+            metadata.row_count = total_rows
+            metadata.column_count = len(sample_df.columns)
+            metadata.table_type = table_type
+            metadata.schema_json = json.dumps(schema_info)
+            metadata.cleaning_summary_json = json.dumps(cleaning_summary)
 
-    db.commit()
-    db.refresh(metadata)
+        meta_session.commit()
+        meta_session.refresh(metadata)
+        meta_session.expunge(metadata)
+
     return metadata, cleaning_summary, schema_info

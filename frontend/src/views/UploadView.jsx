@@ -319,7 +319,7 @@ export default function UploadView({ onUploadComplete, onUploadStateChange, setA
             }
 
             // All chunks transmitted -> stream clean directly into warehouse
-            setCurrentStageIndex(3);
+            setCurrentStageIndex(2);
             setStageStatusText(`Server streaming & cleaning ${file.name} directly into warehouse...`);
             setFileStatuses(prev => ({
               ...prev,
@@ -327,17 +327,31 @@ export default function UploadView({ onUploadComplete, onUploadStateChange, setA
             }));
             setFileStageTexts(prev => ({ ...prev, [file.name]: 'Cleaning & Ingesting...' }));
 
-            let chunkCleanPct = 65;
+            let secondsElapsed = 0;
             const chunkCleanTimer = setInterval(() => {
-              chunkCleanPct += 2;
-              if (chunkCleanPct >= 96) {
-                chunkCleanPct = 96;
-                clearInterval(chunkCleanTimer);
+              secondsElapsed++;
+              const calculatedPct = Math.min(95, Math.round(65 + (30 * (1 - Math.exp(-secondsElapsed / 45)))));
+              setFileProgresses(prev => ({ ...prev, [file.name]: calculatedPct }));
+              setOverallProgress(calculatedPct);
+
+              if (secondsElapsed < 12) {
+                setCurrentStageIndex(2);
+                setStageStatusText(`Assembling chunks & normalizing schema for ${file.name} (${secondsElapsed}s)...`);
+                setFileStageTexts(prev => ({ ...prev, [file.name]: 'Schema Normalization' }));
+              } else if (secondsElapsed < 35) {
+                setCurrentStageIndex(3);
+                setStageStatusText(`Vectorized cleaning & streaming records into warehouse (${secondsElapsed}s, large files take ~45-90s)...`);
+                setFileStageTexts(prev => ({ ...prev, [file.name]: 'Ingesting Rows' }));
+              } else if (secondsElapsed < 65) {
+                setCurrentStageIndex(4);
+                setStageStatusText(`Imputing null values & deduplicating records (${secondsElapsed}s, please wait)...`);
+                setFileStageTexts(prev => ({ ...prev, [file.name]: 'Deduplicating' }));
+              } else {
+                setCurrentStageIndex(5);
+                setStageStatusText(`Building high-speed B-Tree indexes on warehouse (${secondsElapsed}s, finalizing)...`);
+                setFileStageTexts(prev => ({ ...prev, [file.name]: 'Indexing Warehouse' }));
               }
-              setFileProgresses(prev => ({ ...prev, [file.name]: chunkCleanPct }));
-              if (chunkCleanPct > 78) setCurrentStageIndex(4);
-              if (chunkCleanPct > 90) setCurrentStageIndex(5);
-            }, 300);
+            }, 1000);
 
             const completeResult = await completeChunkedUpload({
               upload_id: uploadId,

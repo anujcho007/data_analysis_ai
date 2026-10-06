@@ -253,8 +253,7 @@ async def upload_file_chunk(
 
 @router.post("/chunk/complete")
 async def complete_chunk_upload(
-    req: ChunkCompleteRequest,
-    db: Session = Depends(get_db)
+    req: ChunkCompleteRequest
 ):
     """
     Assembles all uploaded chunks in sorted order, stream-cleans the assembled file
@@ -288,33 +287,38 @@ async def complete_chunk_upload(
 
     # 3. Stream-clean and ingest directly into warehouse using worker thread
     def _run_stream_ingestion():
-        from app.core.database import SessionLocal
-        with SessionLocal() as db_session:
-            if req.clear_existing:
+        from app.core.database import SessionLocal, engine
+        if req.clear_existing:
+            with SessionLocal() as db_session:
                 drop_all_warehouse_tables(db_session)
                 db_session.commit()
+            engine.dispose()
 
-            metadata, cleaning_summary, schema_info = stream_clean_large_csv_to_warehouse(
-                file_path=final_path,
-                table_name=table_name,
-                original_filename=req.filename,
-                db=db_session,
-                drop_duplicates=req.drop_duplicates,
-                fill_nulls=req.fill_nulls,
-                numeric_strategy=req.numeric_strategy,
-                categorical_strategy=req.categorical_strategy,
-                standardize_columns=req.standardize_columns,
-                standardize_dates=req.standardize_dates
-            )
+        metadata, cleaning_summary, schema_info = stream_clean_large_csv_to_warehouse(
+            file_path=final_path,
+            table_name=table_name,
+            original_filename=req.filename,
+            db=None,
+            drop_duplicates=req.drop_duplicates,
+            fill_nulls=req.fill_nulls,
+            numeric_strategy=req.numeric_strategy,
+            categorical_strategy=req.categorical_strategy,
+            standardize_columns=req.standardize_columns,
+            standardize_dates=req.standardize_dates,
+            chunk_rows=150_000
+        )
+
+        with SessionLocal() as db_session:
             star_relationships = detect_star_schema_relationships(db_session)
-            meta_data = {
-                "table_name": str(metadata.table_name),
-                "original_filename": str(metadata.original_filename),
-                "row_count": int(metadata.row_count),
-                "column_count": int(metadata.column_count),
-                "table_type": str(metadata.table_type)
-            }
-            return meta_data, cleaning_summary, schema_info, star_relationships
+
+        meta_data = {
+            "table_name": str(metadata.table_name),
+            "original_filename": str(metadata.original_filename),
+            "row_count": int(metadata.row_count),
+            "column_count": int(metadata.column_count),
+            "table_type": str(metadata.table_type)
+        }
+        return meta_data, cleaning_summary, schema_info, star_relationships
 
     try:
         meta_data, cleaning_summary, schema_info, star_relationships = await asyncio.to_thread(_run_stream_ingestion)
