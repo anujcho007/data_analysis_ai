@@ -1,0 +1,11 @@
+customer_id,Customer Name,Email,City,Signup Date
+101, Alice Smith ,alice@example.com,New York,2024-01-15
+102,Bob Jones,bob@example.com,,2024/02/20
+103,Charlie Brown,charlie@sample.org,Chicago,2024-03-01
+104, Diana Prince ,diana@themyscira.com,Boston,2024-03-12
+105,Evan Wright,,Seattle,2024-04-05
+101, Alice Smith ,alice@example.com,New York,2024-01-15
+106,Fiona Gallagher,fiona@shameless.tv,Chicago,2024-05-18
+107,George Clark,george@domain.net,,2024-06-22
+108,Hannah Abbott,hannah@hogwarts.uk,London,2024-07-09
+103,Charlie Brown,charlie@sample.org,Chicago,2024-03-01
