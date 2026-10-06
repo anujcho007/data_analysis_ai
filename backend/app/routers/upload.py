@@ -91,8 +91,7 @@ async def upload_multiple_csv(
     numeric_strategy: str = Form("median"),
     categorical_strategy: str = Form("mode"),
     standardize_columns: bool = Form(True),
-    standardize_dates: bool = Form(True),
-    db: Session = Depends(get_db)
+    standardize_dates: bool = Form(True)
 ):
     """
     High-Performance Parallel Multi-CSV Ingestion Pipeline:
@@ -146,11 +145,13 @@ async def upload_multiple_csv(
 
     # 3. Synchronized database ingestion executed in worker thread (keeps event loop free and responsive)
     def _ingest_to_db():
-        from app.core.database import SessionLocal
+        from app.core.database import SessionLocal, engine
+        engine.dispose()
         with SessionLocal() as db_session:
             if clear_existing:
                 drop_all_warehouse_tables(db_session)
                 db_session.commit()
+            engine.dispose()
 
             results = []
             total_initial_rows = 0

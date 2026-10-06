@@ -56,44 +56,46 @@ def save_dataframe_to_warehouse(
     Saves cleaned DataFrame dynamically into SQLite database with bulk optimizations,
     indexes primary/foreign key candidates, and updates metadata table.
     """
-    # Ensure any open transaction is committed before running DDL / table replacement
-    db.commit()
+    import sqlite3
+    from app.config import DB_PATH
+    from app.core.database import engine
 
-    conn = db.connection()
-    # Boost SQLite write speed for bulk ingestion
-    try:
-        conn.execute(text("PRAGMA synchronous = OFF"))
-        conn.execute(text("PRAGMA journal_mode = WAL"))
-        conn.execute(text("PRAGMA cache_size = -128000"))
-        conn.execute(text("PRAGMA temp_store = MEMORY"))
-    except Exception:
-        pass
+    # Ensure any open transaction is committed and pool disposed before running DDL
+    if db:
+        try:
+            db.commit()
+        except Exception:
+            pass
+    engine.dispose()
 
-    # Write to SQLite in chunks using the session's active connection
-    df.to_sql(table_name, con=conn, if_exists="replace", index=False, chunksize=50000)
+    sanitized_tbl = re.sub(r'[^a-zA-Z0-9_]', '', table_name)
+    with sqlite3.connect(DB_PATH.as_posix(), timeout=60) as raw_conn:
+        raw_conn.execute("PRAGMA busy_timeout = 60000")
+        raw_conn.execute("PRAGMA journal_mode = WAL")
+        raw_conn.execute("PRAGMA synchronous = NORMAL")
+        raw_conn.execute("PRAGMA cache_size = -128000")
+        raw_conn.execute("PRAGMA temp_store = MEMORY")
 
-    # Automatically index candidate keys and temporal columns to make joins and Star Schema instant
-    try:
-        sanitized_tbl = re.sub(r'[^a-zA-Z0-9_]', '', table_name)
-        temporal_suffixes = ('_date', '_time', '_at', 'timestamp', 'date', 'datetime', 'order_date', 'created_at')
-        for col_info in schema_info:
-            col_name = col_info.get("name", "")
-            col_l = col_name.lower()
-            is_pk = col_info.get("is_unique", False) and col_info.get("null_count", 0) == 0
-            is_key_suffix = col_l.endswith(('_id', '_key', '_code')) or col_l in ['id', 'pk']
-            is_temporal = any(col_l.endswith(sfx) or col_l == sfx for sfx in temporal_suffixes)
-            if is_pk or is_key_suffix or is_temporal:
-                sanitized_col = re.sub(r'[^a-zA-Z0-9_]', '', col_name)
-                idx_name = f"idx_{sanitized_tbl}_{sanitized_col}"
-                conn.execute(text(f'CREATE INDEX IF NOT EXISTS "{idx_name}" ON "{sanitized_tbl}" ("{sanitized_col}")'))
-    except Exception:
-        pass
+        # Direct fast C-level table creation and insertion (avoids SQLAlchemy transaction locking)
+        df.to_sql(sanitized_tbl, con=raw_conn, if_exists="replace", index=False, chunksize=50000)
 
-    # Restore safe synchronous mode
-    try:
-        conn.execute(text("PRAGMA synchronous = NORMAL"))
-    except Exception:
-        pass
+        # Automatically index candidate keys and temporal columns
+        try:
+            temporal_suffixes = ('_date', '_time', '_at', 'timestamp', 'date', 'datetime', 'order_date', 'created_at')
+            for col_info in schema_info:
+                col_name = col_info.get("name", "")
+                col_l = col_name.lower()
+                is_pk = col_info.get("is_unique", False) and col_info.get("null_count", 0) == 0
+                is_key_suffix = col_l.endswith(('_id', '_key', '_code')) or col_l in ['id', 'pk']
+                is_temporal = any(col_l.endswith(sfx) or col_l == sfx for sfx in temporal_suffixes)
+                if is_pk or is_key_suffix or is_temporal:
+                    sanitized_col = re.sub(r'[^a-zA-Z0-9_]', '', col_name)
+                    idx_name = f"idx_{sanitized_tbl}_{sanitized_col}"
+                    raw_conn.execute(f'CREATE INDEX IF NOT EXISTS "{idx_name}" ON "{sanitized_tbl}" ("{sanitized_col}")')
+        except Exception:
+            pass
+
+        raw_conn.commit()
 
     # Initial classification
     table_type = classify_table_dynamically(df, table_name)
@@ -389,6 +391,7 @@ def drop_all_warehouse_tables(db: Session = None):
     """
     import sqlite3
     from app.config import DB_PATH
+    from app.core.database import engine
     reserved = {
         "users", "dataset_metadata", "sqlite_sequence", "sqlite_master", "sqlite_temp_master",
         "alert_rules", "alert_history", "workspaces", "workspace_members", "database_connections"
@@ -402,6 +405,9 @@ def drop_all_warehouse_tables(db: Session = None):
                 db.rollback()
             except Exception:
                 pass
+
+    # Force release any pooled SQLAlchemy connections before raw DDL execution
+    engine.dispose()
 
     # Direct raw SQLite in autocommit mode (isolation_level=None)
     # Autocommit mode is required for DDL in SQLite to avoid lock escalation failures
