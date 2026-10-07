@@ -28,7 +28,8 @@ import {
   executeAiQuery, 
   deleteTable, 
   resetWarehouse, 
-  fetchSuggestedQueries 
+  fetchSuggestedQueries,
+  fetchTableSuggestedPrompts
 } from '../api/client';
 import ConfirmModal from '../components/ConfirmModal';
 
@@ -37,6 +38,7 @@ export default function SchemaExplorer({ tables, onRefresh }) {
   const [tableData, setTableData] = useState(null);
   const [relationships, setRelationships] = useState([]);
   const [suggestedQueries, setSuggestedQueries] = useState([]);
+  const [tableSuggestedPrompts, setTableSuggestedPrompts] = useState([]);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [tableToDelete, setTableToDelete] = useState(null);
@@ -133,16 +135,31 @@ export default function SchemaExplorer({ tables, onRefresh }) {
     fetchRelationships()
       .then(setRelationships)
       .catch(console.error);
+  }, [tables]);
 
-    fetchSuggestedQueries()
+  // Dynamically load queries and AI prompts whenever selected table changes
+  useEffect(() => {
+    if (!selectedTable) return;
+
+    fetchSuggestedQueries(selectedTable)
       .then((queries) => {
-        setSuggestedQueries(queries);
-        if (queries.length > 0 && !sqlQuery) {
-          setSqlQuery(queries[0].query);
+        if (queries && queries.length > 0) {
+          setSuggestedQueries(queries);
+          if (!sqlQuery) {
+            setSqlQuery(queries[0].query);
+          }
         }
       })
       .catch(console.error);
-  }, [tables]);
+
+    fetchTableSuggestedPrompts(selectedTable)
+      .then((prompts) => {
+        if (prompts && prompts.length > 0) {
+          setTableSuggestedPrompts(prompts);
+        }
+      })
+      .catch(console.error);
+  }, [selectedTable]);
 
   const loadPreview = async (name) => {
     setIsLoadingPreview(true);
@@ -606,6 +623,53 @@ export default function SchemaExplorer({ tables, onRefresh }) {
                     <span>{isExecutingSql ? 'Analyzing...' : 'Ask AI & Run'}</span>
                   </button>
                 </form>
+
+                {/* AI Suggested Prompts for Selected Table */}
+                {tableSuggestedPrompts.length > 0 && (
+                  <div style={{ marginTop: '12px', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Sparkles size={13} color="#4f46e5" />
+                      Suggested for {selectedTable}:
+                    </span>
+                    {tableSuggestedPrompts.slice(0, 5).map((p, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          setAiPrompt(p);
+                          handleRunAiQuery(p);
+                        }}
+                        style={{
+                          background: '#ffffff',
+                          border: '1px solid #c7d2fe',
+                          borderRadius: '9999px',
+                          padding: '4px 12px',
+                          fontSize: '0.75rem',
+                          color: '#334155',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          boxShadow: '0 1px 3px rgba(79, 70, 229, 0.06)'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = '#eef2ff';
+                          e.currentTarget.style.borderColor = '#4f46e5';
+                          e.currentTarget.style.color = '#4338ca';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = '#ffffff';
+                          e.currentTarget.style.borderColor = '#c7d2fe';
+                          e.currentTarget.style.color = '#334155';
+                        }}
+                      >
+                        <span style={{ color: '#4f46e5', fontWeight: 'bold' }}>⚡</span>
+                        <span>{p}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 

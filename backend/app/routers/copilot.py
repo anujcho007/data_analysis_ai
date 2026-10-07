@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.core.database import get_db
@@ -8,6 +8,7 @@ from app.services.copilot_engine import (
     execute_safe_sql,
     extract_warehouse_schema_summary
 )
+from app.services.prompt_generator import generate_prompts_for_database
 from app.models.dataset import DatasetMetadata
 
 router = APIRouter(prefix="/api/copilot", tags=["Conversational AI Copilot"])
@@ -46,21 +47,11 @@ def execute_copilot_sql(req: ExecuteSqlRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"SQL execution error: {str(e)}")
 
 @router.get("/prompts")
-def get_suggested_prompts(db: Session = Depends(get_db)):
-    """Returns dynamic starter prompts tailored to the currently ingested tables."""
-    datasets = db.query(DatasetMetadata).all()
-    if not datasets:
-        return [
-            "What can you do?",
-            "How do I upload data to the warehouse?",
-            "What connectors are supported?"
-        ]
-        
-    prompts = [
-        f"Give me an executive summary of table '{datasets[0].table_name}'",
-        f"Which records have the highest metrics in '{datasets[0].table_name}'?",
-        "Are there any anomalous spikes or revenue drops in our warehouse?",
-        "Show me the distribution of categories in our fact tables",
-        "Forecast performance for the next 30 days"
-    ]
-    return prompts
+def get_suggested_prompts(
+    table_name: Optional[str] = Query(None, description="Optional target table name to focus prompts on"),
+    limit: int = Query(8, ge=1, le=20),
+    db: Session = Depends(get_db)
+):
+    """Returns dynamic starter prompts tailored to the currently ingested tables or specified table."""
+    return generate_prompts_for_database(db, target_table=table_name, limit=limit)
+

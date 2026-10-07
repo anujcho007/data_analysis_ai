@@ -55,10 +55,24 @@ def get_relationships(db: Session = Depends(get_db)):
     return detect_star_schema_relationships(db)
 
 @router.get("/suggested-queries")
-def get_suggested_queries(db: Session = Depends(get_db)):
-    """Return dynamically generated analytical SQL queries based on current schema."""
+def get_suggested_queries(
+    table_name: Optional[str] = Query(None, description="Optional target table name"),
+    db: Session = Depends(get_db)
+):
+    """Return dynamically generated analytical SQL queries based on current schema or selected table."""
     from app.services.schema_builder import generate_dynamic_sample_queries
-    return generate_dynamic_sample_queries(db)
+    return generate_dynamic_sample_queries(db, table_name=table_name)
+
+@router.get("/suggested-prompts")
+def get_table_suggested_prompts(
+    table_name: Optional[str] = Query(None, description="Optional target table name"),
+    limit: int = Query(6, ge=1, le=20),
+    db: Session = Depends(get_db)
+):
+    """Return dynamic plain-English AI prompts tailored to the table's schema and columns."""
+    from app.services.prompt_generator import generate_prompts_for_database
+    return generate_prompts_for_database(db, target_table=table_name, limit=limit)
+
 
 @router.get("/stats")
 def get_warehouse_stats(db: Session = Depends(get_db)):

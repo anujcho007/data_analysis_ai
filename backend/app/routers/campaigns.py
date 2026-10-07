@@ -60,7 +60,7 @@ def get_campaign_analytics(
                 raise HTTPException(status_code=400, detail=f"Table '{req.table_name}' contains no records.")
             
             if not col_mapping:
-                col_mapping = detect_marketing_columns(df)
+                col_mapping = detect_marketing_columns(df, req.table_name)
             is_custom = True
         except HTTPException:
             raise
@@ -77,7 +77,8 @@ def get_campaign_analytics(
             channel_filter=req.channel,
             campaign_filter=req.campaign,
             start_date=req.start_date,
-            end_date=req.end_date
+            end_date=req.end_date,
+            table_name=req.table_name or "benchmark_demo"
         )
         analytics['is_custom_table'] = is_custom
         analytics['source_table'] = req.table_name or "benchmark_demo"

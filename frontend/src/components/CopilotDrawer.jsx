@@ -22,7 +22,14 @@ import {
 } from 'lucide-react';
 import { chatWithCopilot, executeCopilotSql, fetchCopilotPrompts } from '../api/client';
 
-export default function CopilotDrawer({ isOpen, onClose }) {
+export default function CopilotDrawer({ 
+  isOpen, 
+  onClose, 
+  tables = [], 
+  initialPrompt = null, 
+  activeTable = null, 
+  onClearInitialPrompt 
+}) {
   const [messages, setMessages] = useState([
     {
       id: 'welcome',
@@ -34,10 +41,18 @@ export default function CopilotDrawer({ isOpen, onClose }) {
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [suggestedPrompts, setSuggestedPrompts] = useState([]);
+  const [selectedTableContext, setSelectedTableContext] = useState(activeTable || 'all');
   const [isCopied, setIsCopied] = useState({});
   const [expandedThoughts, setExpandedThoughts] = useState({});
   const [activeSqlExecution, setActiveSqlExecution] = useState(null);
   const messagesEndRef = useRef(null);
+
+  // Sync activeTable prop if it changes
+  useEffect(() => {
+    if (activeTable) {
+      setSelectedTableContext(activeTable);
+    }
+  }, [activeTable]);
 
   // Auto-scroll to bottom of chat
   useEffect(() => {
@@ -46,11 +61,12 @@ export default function CopilotDrawer({ isOpen, onClose }) {
     }
   }, [messages, isOpen]);
 
-  // Load starter prompts
+  // Load starter prompts dynamically based on selected table context or all warehouse data
   useEffect(() => {
     const loadPrompts = async () => {
       try {
-        const prompts = await fetchCopilotPrompts();
+        const tbl = selectedTableContext === 'all' ? null : selectedTableContext;
+        const prompts = await fetchCopilotPrompts(tbl);
         if (prompts && prompts.length > 0) {
           setSuggestedPrompts(prompts);
         }
@@ -61,7 +77,15 @@ export default function CopilotDrawer({ isOpen, onClose }) {
     if (isOpen) {
       loadPrompts();
     }
-  }, [isOpen]);
+  }, [isOpen, selectedTableContext]);
+
+  // Auto-send initial prompt if triggered from external card
+  useEffect(() => {
+    if (isOpen && initialPrompt) {
+      handleSendMessage(initialPrompt);
+      if (onClearInitialPrompt) onClearInitialPrompt();
+    }
+  }, [isOpen, initialPrompt]);
 
   const handleSendMessage = async (textToSend = null) => {
     const query = (textToSend || inputText).trim();
@@ -511,35 +535,105 @@ export default function CopilotDrawer({ isOpen, onClose }) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Starter Prompts Carousel (Shown if chat is short) */}
-      {messages.length <= 2 && suggestedPrompts.length > 0 && (
+      {/* Dynamic Data-Driven Suggested Prompts & Table Context */}
+      {suggestedPrompts.length > 0 && (
         <div style={{
-          padding: '8px 16px',
-          background: '#f1f5f9',
+          padding: '10px 16px',
+          background: '#f8fafc',
           borderTop: '1px solid #e2e8f0',
           display: 'flex',
-          gap: '8px',
-          overflowX: 'auto',
-          whiteSpace: 'nowrap'
+          flexDirection: 'column',
+          gap: '8px'
         }}>
-          {suggestedPrompts.slice(0, 3).map((prompt, idx) => (
-            <button
-              key={idx}
-              onClick={() => handleSendMessage(prompt)}
-              style={{
-                background: '#ffffff',
-                border: '1px solid #cbd5e1',
-                borderRadius: '8px',
-                padding: '4px 10px',
-                fontSize: '0.7rem',
-                color: '#334155',
-                cursor: 'pointer',
-                fontWeight: '600'
-              }}
-            >
-              💡 {prompt}
-            </button>
-          ))}
+          {/* Table Context Selector if multiple tables exist */}
+          {tables && tables.length > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflowX: 'auto', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: '700' }}>Context:</span>
+              <button
+                type="button"
+                onClick={() => setSelectedTableContext('all')}
+                style={{
+                  padding: '2px 8px',
+                  borderRadius: '9999px',
+                  fontSize: '0.68rem',
+                  fontWeight: '700',
+                  border: '1px solid',
+                  borderColor: selectedTableContext === 'all' ? '#4f46e5' : '#cbd5e1',
+                  background: selectedTableContext === 'all' ? '#e0e7ff' : '#ffffff',
+                  color: selectedTableContext === 'all' ? '#4338ca' : '#64748b',
+                  cursor: 'pointer'
+                }}
+              >
+                All Tables
+              </button>
+              {tables.map((t, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setSelectedTableContext(t.table_name)}
+                  style={{
+                    padding: '2px 8px',
+                    borderRadius: '9999px',
+                    fontSize: '0.68rem',
+                    fontWeight: '700',
+                    border: '1px solid',
+                    borderColor: selectedTableContext === t.table_name ? '#4f46e5' : '#cbd5e1',
+                    background: selectedTableContext === t.table_name ? '#e0e7ff' : '#ffffff',
+                    color: selectedTableContext === t.table_name ? '#4338ca' : '#64748b',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {t.table_name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Dynamic Suggestion Chips Carousel */}
+          <div style={{
+            display: 'flex',
+            gap: '8px',
+            overflowX: 'auto',
+            whiteSpace: 'nowrap',
+            paddingBottom: '2px'
+          }}>
+            {suggestedPrompts.slice(0, 5).map((prompt, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => handleSendMessage(prompt)}
+                disabled={isLoading}
+                style={{
+                  background: '#ffffff',
+                  border: '1px solid #c7d2fe',
+                  borderRadius: '10px',
+                  padding: '5px 12px',
+                  fontSize: '0.73rem',
+                  color: '#334155',
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 1px 3px rgba(79, 70, 229, 0.05)',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = '#4f46e5';
+                  e.currentTarget.style.background = '#eef2ff';
+                  e.currentTarget.style.color = '#4338ca';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = '#c7d2fe';
+                  e.currentTarget.style.background = '#ffffff';
+                  e.currentTarget.style.color = '#334155';
+                }}
+              >
+                <span style={{ color: '#4f46e5', fontWeight: 'bold' }}>⚡</span>
+                <span>{prompt}</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

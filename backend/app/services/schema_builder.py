@@ -303,24 +303,46 @@ def detect_star_schema_relationships(db: Session, force_refresh: bool = False) -
     _STAR_SCHEMA_CACHE_TIMESTAMP = time.time()
     return unique_rels
 
-def generate_dynamic_sample_queries(db: Session) -> List[Dict[str, str]]:
-    """Generates analytical SQL sample queries tailored dynamically to the current warehouse schema."""
+def generate_dynamic_sample_queries(db: Session, table_name: Optional[str] = None) -> List[Dict[str, str]]:
+    """Generates analytical SQL sample queries tailored dynamically to the current warehouse schema or specified table."""
+    from app.services.prompt_generator import generate_suggested_queries_for_table
+
     datasets = db.query(DatasetMetadata).all()
     if not datasets:
         return []
 
+    # If specific table requested
+    if table_name:
+        for d in datasets:
+            if d.table_name.lower() == table_name.lower():
+                try:
+                    schema_info = json.loads(d.schema_json) if d.schema_json else []
+                except Exception:
+                    schema_info = []
+                return generate_suggested_queries_for_table(
+                    d.table_name,
+                    schema_info,
+                    row_count=d.row_count,
+                    limit=6
+                )
+
+    # Default to first table with rich column queries
+    target_d = datasets[0]
+    try:
+        schema_info = json.loads(target_d.schema_json) if target_d.schema_json else []
+    except Exception:
+        schema_info = []
+
+    queries = generate_suggested_queries_for_table(
+        target_d.table_name,
+        schema_info,
+        row_count=target_d.row_count,
+        limit=4
+    )
+
+    # Join queries for detected relationships
     relationships = detect_star_schema_relationships(db)
-    queries = []
-
-    # 1. Preview query for the first table
-    first_tbl = datasets[0].table_name
-    queries.append({
-        "label": f"Preview {first_tbl}",
-        "query": f'SELECT * FROM "{first_tbl}" LIMIT 25;'
-    })
-
-    # 2. Join queries for each detected relationship
-    for rel in relationships[:3]:
+    for rel in relationships[:2]:
         src = rel["source_table"]
         tgt = rel["target_table"]
         src_col = rel["source_column"]

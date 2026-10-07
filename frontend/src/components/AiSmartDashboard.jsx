@@ -21,7 +21,7 @@ import {
   Calendar,
   Zap
 } from 'lucide-react';
-import { generateAiDashboard, downloadDashboardHtml } from '../api/client';
+import { generateAiDashboard, downloadDashboardHtml, fetchCopilotPrompts } from '../api/client';
 
 export default function AiSmartDashboard({ tables = [], setActiveTab }) {
   const [prompt, setPrompt] = useState('');
@@ -41,13 +41,30 @@ export default function AiSmartDashboard({ tables = [], setActiveTab }) {
     'Generating interactive multi-chart visualizations...'
   ];
 
-  // Quick prompt suggestions
-  const promptSuggestions = [
-    '🌟 Executive summary of all tables & revenue drivers',
-    '💰 Sales trajectory, average order value & price trends',
+  // Dynamic data-driven prompt suggestions
+  const [promptSuggestions, setPromptSuggestions] = useState([
+    '🌟 Executive summary of all tables & key performance drivers',
+    '💰 Metric trajectories, averages & distribution across categories',
     '🏆 Top performing entities, categories & leaderboards',
     '📅 Monthly volume velocity & temporal distribution'
-  ];
+  ]);
+
+  // Load prompts dynamically according to uploaded tables & data distributions
+  useEffect(() => {
+    const loadDynamicSuggestions = async () => {
+      try {
+        const prompts = await fetchCopilotPrompts(focusTable || null);
+        if (prompts && prompts.length > 0) {
+          setPromptSuggestions(prompts.slice(0, 5));
+        }
+      } catch (err) {
+        console.warn('Failed to load dashboard dynamic prompts:', err);
+      }
+    };
+    if (tables.length > 0) {
+      loadDynamicSuggestions();
+    }
+  }, [focusTable, tables.length]);
 
   // Initial auto-generation if tables exist and no dashboard is present yet
   useEffect(() => {

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Database, 
   Layers, 
@@ -10,11 +10,33 @@ import {
   Network,
   CheckCircle2,
   Table as TableIcon,
-  BarChart3
+  BarChart3,
+  Bot
 } from 'lucide-react';
 import StatCard from '../components/StatCard';
+import { fetchCopilotPrompts } from '../api/client';
 
-export default function Dashboard({ stats, tables, relationships, setActiveTab, onRefresh }) {
+export default function Dashboard({ 
+  stats, 
+  tables, 
+  relationships, 
+  setActiveTab, 
+  onRefresh, 
+  onOpenCopilotWithPrompt 
+}) {
+  const [dashboardPrompts, setDashboardPrompts] = useState([]);
+
+  useEffect(() => {
+    if (tables && tables.length > 0) {
+      fetchCopilotPrompts()
+        .then((prompts) => {
+          if (prompts && prompts.length > 0) {
+            setDashboardPrompts(prompts);
+          }
+        })
+        .catch(console.error);
+    }
+  }, [tables]);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
       {/* Hero Welcome Banner */}
@@ -87,6 +109,95 @@ export default function Dashboard({ stats, tables, relationships, setActiveTab, 
           </div>
         </div>
       </div>
+
+      {/* Dynamic Data-Driven AI Suggested Queries Banner */}
+      {dashboardPrompts.length > 0 && (
+        <div className="glass-panel" style={{
+          padding: '16px 22px',
+          background: 'linear-gradient(135deg, rgba(238, 242, 255, 0.95) 0%, rgba(240, 249, 255, 0.95) 100%)',
+          border: '1.5px solid #c7d2fe',
+          borderRadius: 'var(--radius-md)',
+          boxShadow: '0 4px 16px -2px rgba(79, 70, 229, 0.08)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '10px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{
+                width: '28px',
+                height: '28px',
+                borderRadius: '8px',
+                background: 'linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#ffffff'
+              }}>
+                <Sparkles size={15} />
+              </div>
+              <span style={{ fontSize: '0.875rem', fontWeight: '800', color: '#1e1b4b' }}>
+                AI Suggested Prompts for Current Data:
+              </span>
+            </div>
+            <span style={{ fontSize: '0.72rem', color: '#4338ca', fontWeight: '700' }}>
+              Click any prompt to launch instant Copilot analysis
+            </span>
+          </div>
+
+          <div style={{
+            display: 'flex',
+            gap: '8px',
+            overflowX: 'auto',
+            whiteSpace: 'nowrap',
+            paddingBottom: '2px'
+          }}>
+            {dashboardPrompts.slice(0, 6).map((prompt, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => {
+                  if (onOpenCopilotWithPrompt) {
+                    onOpenCopilotWithPrompt(prompt);
+                  } else {
+                    setActiveTab('schema');
+                  }
+                }}
+                style={{
+                  background: '#ffffff',
+                  border: '1px solid #c7d2fe',
+                  borderRadius: '10px',
+                  padding: '6px 12px',
+                  fontSize: '0.75rem',
+                  color: '#334155',
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 1px 3px rgba(79, 70, 229, 0.05)',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = '#4f46e5';
+                  e.currentTarget.style.background = '#eef2ff';
+                  e.currentTarget.style.color = '#4338ca';
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = '#c7d2fe';
+                  e.currentTarget.style.background = '#ffffff';
+                  e.currentTarget.style.color = '#334155';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }}
+              >
+                <span style={{ color: '#4f46e5', fontWeight: 'bold' }}>⚡</span>
+                <span>{prompt}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* KPI Stats Grid */}
       <div style={{

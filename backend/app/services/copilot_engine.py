@@ -109,11 +109,43 @@ def heuristic_query_engine(query_text: str, db: Session) -> Dict[str, Any]:
     cat_cols = [c["name"] for c in schema if c.get("data_type") in ("VARCHAR", "TEXT", "STRING") and not c["name"].endswith("_id")]
     date_cols = [c["name"] for c in schema if "date" in c["name"].lower() or "time" in c["name"].lower()]
 
-    metric_col = num_cols[0] if num_cols else "*"
-    cat_col = cat_cols[0] if cat_cols else (schema[0]["name"] if schema else "id")
+    # Match specific columns referenced in user query
+    matched_metric = None
+    for nc in sorted(num_cols, key=len, reverse=True):
+        if nc.lower() in q_lower or nc.lower().replace("_", " ") in q_lower:
+            matched_metric = nc
+            break
+    metric_col = matched_metric or (num_cols[0] if num_cols else "*")
+
+    all_col_names = [c["name"] for c in schema]
+    matched_cat = None
+    for cc in sorted(cat_cols + [c for c in all_col_names if c not in cat_cols and c not in num_cols], key=len, reverse=True):
+        if cc.lower() in q_lower or cc.lower().replace("_", " ") in q_lower:
+            matched_cat = cc
+            break
+    cat_col = matched_cat or (cat_cols[0] if cat_cols else (schema[0]["name"] if schema else "id"))
+
+    matched_date = None
+    for dc in sorted(date_cols, key=len, reverse=True):
+        if dc.lower() in q_lower or dc.lower().replace("_", " ") in q_lower:
+            matched_date = dc
+            break
+    date_col = matched_date or (date_cols[0] if date_cols else None)
+
+    # Intent 0: Grouped Aggregations (e.g. "total and average {metric} grouped by {cat}")
+    has_group_by_intent = any(k in q_lower for k in ["grouped by", "group by", "grouped across", "grouped", "broken down by"]) or (" by " in q_lower and any(k in q_lower for k in ["average", "avg", "total", "sum", "count", "metrics"]))
+    if has_group_by_intent and cat_col:
+        if metric_col != "*":
+            sql = f"SELECT {cat_col}, COUNT(*) AS record_count, ROUND(SUM({metric_col}), 2) AS total_{metric_col}, ROUND(AVG({metric_col}), 2) AS avg_{metric_col} FROM {t_name} GROUP BY {cat_col} ORDER BY total_{metric_col} DESC LIMIT 15"
+            explanation = f"Calculated total and average `{metric_col}` in `{t_name}` grouped across `{cat_col}`."
+            chart = {"type": "bar", "x_key": cat_col, "y_key": f"total_{metric_col}"}
+        else:
+            sql = f"SELECT {cat_col}, COUNT(*) AS record_count FROM {t_name} GROUP BY {cat_col} ORDER BY record_count DESC LIMIT 15"
+            explanation = f"Calculated record volume in `{t_name}` grouped across `{cat_col}`."
+            chart = {"type": "bar", "x_key": cat_col, "y_key": "record_count"}
 
     # Intent 1: Top / Highest / Best performers
-    if any(k in q_lower for k in ["top", "highest", "best", "most", "largest", "maximum"]):
+    elif any(k in q_lower for k in ["top", "highest", "best", "most", "largest", "maximum"]):
         if metric_col != "*" and cat_col:
             sql = f"SELECT {cat_col}, SUM({metric_col}) AS total_{metric_col} FROM {t_name} GROUP BY {cat_col} ORDER BY total_{metric_col} DESC LIMIT 10"
             explanation = f"Analyzed top performers in `{t_name}` grouped by `{cat_col}` sorted by total `{metric_col}`."
@@ -135,18 +167,18 @@ def heuristic_query_engine(query_text: str, db: Session) -> Dict[str, Any]:
             chart = None
 
     # Intent 3: Trend over time / Date distribution
-    elif any(k in q_lower for k in ["trend", "time", "month", "over time", "timeline", "history", "forecast"]) and date_cols:
-        d_col = date_cols[0]
+    elif any(k in q_lower for k in ["trend", "time", "month", "over time", "timeline", "history", "forecast"]) and date_col:
+        d_col = date_col
         if metric_col != "*":
-            sql = f"SELECT {d_col}, SUM({metric_col}) AS total_{metric_col} FROM {t_name} GROUP BY {d_col} ORDER BY {d_col} ASC LIMIT 30"
-            chart = {"type": "line", "x_key": d_col, "y_key": f"total_{metric_col}"}
+            sql = f"SELECT substr({d_col}, 1, 10) AS day, SUM({metric_col}) AS total_{metric_col} FROM {t_name} WHERE {d_col} IS NOT NULL GROUP BY day ORDER BY day ASC LIMIT 30"
+            chart = {"type": "line", "x_key": "day", "y_key": f"total_{metric_col}"}
         else:
-            sql = f"SELECT {d_col}, COUNT(*) AS total_count FROM {t_name} GROUP BY {d_col} ORDER BY {d_col} ASC LIMIT 30"
-            chart = {"type": "line", "x_key": d_col, "y_key": "total_count"}
+            sql = f"SELECT substr({d_col}, 1, 10) AS day, COUNT(*) AS total_count FROM {t_name} WHERE {d_col} IS NOT NULL GROUP BY day ORDER BY day ASC LIMIT 30"
+            chart = {"type": "line", "x_key": "day", "y_key": "total_count"}
         explanation = f"Calculated temporal trajectory across `{d_col}` in `{t_name}`."
 
-    # Intent 4: Distribution / Breakdown / Group by
-    elif any(k in q_lower for k in ["distribution", "breakdown", "category", "share", "percentage", "split"]) and cat_col:
+    # Intent 4: Distribution / Breakdown / Share
+    elif any(k in q_lower for k in ["distribution", "breakdown", "category", "share", "percentage", "split", "rates"]) and cat_col:
         sql = f"SELECT {cat_col}, COUNT(*) AS record_count FROM {t_name} GROUP BY {cat_col} ORDER BY record_count DESC LIMIT 8"
         explanation = f"Categorical breakdown of `{t_name}` segmented by `{cat_col}`."
         chart = {"type": "pie", "x_key": cat_col, "y_key": "record_count"}

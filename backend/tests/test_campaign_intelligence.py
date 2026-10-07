@@ -100,3 +100,46 @@ def test_compute_campaign_analytics_filtered():
     )
     assert analytics_range['kpis']['impressions']['value'] > 0
     assert analytics_range['kpis']['impressions']['value'] < compute_campaign_analytics(df=df)['kpis']['impressions']['value']
+
+def test_api_telemetry_domain_adaptation():
+    df_api = pd.DataFrame({
+        'request_uuid': ['d587900e-2d84-44c6-9125-321acef2691f', '1fa994bb-f750-4237-8370-6d4263c7f6d4', '3fa994bb-f750-4237-8370-6d4263c7f6d5'],
+        'api_name': ['summarize_text_completion', 'extract_document_data', 'extract_document_data'],
+        'request_model': ['GenericInvoice', 'Vendor_Report', 'Vendor_Report'],
+        'total_input_token_count': [1500, 3200, 4100],
+        'total_output_token_count': [220, 480, 510],
+        'total_page_count': [2, 5, 6],
+        'execution_start_datetime': ['2024-02-01 10:00:00', '2024-02-02 11:30:00', '2024-02-03 14:15:00'],
+        'status': ['SUCCESS', 'SUCCESS', 'ERROR']
+    })
+    mapping = detect_marketing_columns(df_api, table_name='transaction_log_uae1708')
+    assert mapping['domain_type'] == 'tech_api'
+    # request_uuid should NOT be chosen as the channel dimension!
+    assert mapping['channel_col'] != 'request_uuid'
+    assert mapping['channel_col'] in ('api_name', 'request_model', 'status')
+    
+    analytics = compute_campaign_analytics(df_api, col_mapping=mapping, table_name='transaction_log_uae1708')
+    assert analytics['domain_type'] == 'tech_api'
+    assert 'Total Requests' in analytics['kpis']['impressions']['title']
+    assert analytics['kpis']['impressions']['value'] == 3
+    assert 'Success Rate' in analytics['kpis']['profit']['title']
+
+def test_healthcare_domain_adaptation():
+    df_health = pd.DataFrame({
+        'patient_id': ['P101', 'P102', 'P103'],
+        'admission_date': ['2024-03-01', '2024-03-02', '2024-03-03'],
+        'department': ['Cardiology', 'Neurology', 'Cardiology'],
+        'doctor_name': ['Dr. Watson', 'Dr. Adams', 'Dr. Watson'],
+        'treatment_cost': [4500.0, 7200.0, 5100.0],
+        'length_of_stay': [5, 9, 6],
+        'status': ['discharged', 'discharged', 'admitted']
+    })
+    mapping = detect_marketing_columns(df_health, table_name='patient_admissions')
+    assert mapping['domain_type'] == 'healthcare'
+    assert mapping['channel_col'] == 'department'
+    
+    analytics = compute_campaign_analytics(df_health, col_mapping=mapping, table_name='patient_admissions')
+    assert analytics['domain_type'] == 'healthcare'
+    assert 'Admissions' in analytics['kpis']['impressions']['title']
+    assert analytics['kpis']['impressions']['value'] == 3
+

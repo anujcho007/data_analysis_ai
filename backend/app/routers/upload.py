@@ -21,6 +21,7 @@ from app.services.schema_builder import (
     detect_star_schema_relationships,
     drop_all_warehouse_tables
 )
+from app.services.prompt_generator import generate_prompts_for_table
 
 router = APIRouter(prefix="/api/upload", tags=["CSV Upload & Ingestion"])
 
@@ -177,6 +178,13 @@ async def upload_multiple_csv(
                 total_duplicates_removed += item["cleaning_summary"]["duplicates_removed"]
                 total_nulls_filled += item["cleaning_summary"]["null_values_filled"]
 
+                dataset_prompts = generate_prompts_for_table(
+                    metadata.table_name,
+                    item["schema_info"],
+                    row_count=metadata.row_count,
+                    limit=6
+                )
+
                 results.append({
                     "table_name": metadata.table_name,
                     "original_filename": metadata.original_filename,
@@ -184,13 +192,18 @@ async def upload_multiple_csv(
                     "column_count": metadata.column_count,
                     "table_type": metadata.table_type,
                     "schema_info": item["schema_info"],
-                    "cleaning_summary": item["cleaning_summary"]
+                    "cleaning_summary": item["cleaning_summary"],
+                    "suggested_prompts": dataset_prompts
                 })
 
             star_relationships = detect_star_schema_relationships(db_session)
             return results, total_initial_rows, total_final_rows, total_duplicates_removed, total_nulls_filled, star_relationships
 
     results, total_initial_rows, total_final_rows, total_duplicates_removed, total_nulls_filled, star_relationships = await asyncio.to_thread(_ingest_to_db)
+
+    all_prompts = []
+    for r in results:
+        all_prompts.extend(r.get("suggested_prompts", []))
 
     return {
         "success": True,
@@ -202,7 +215,8 @@ async def upload_multiple_csv(
             "total_nulls_filled": total_nulls_filled
         },
         "datasets": results,
-        "star_schema_relationships": star_relationships
+        "star_schema_relationships": star_relationships,
+        "suggested_prompts": all_prompts[:10]
     }
 
 
@@ -329,6 +343,13 @@ async def complete_chunk_upload(
             detail=f"Streaming ingestion error: {str(e)}"
         )
 
+    dataset_prompts = generate_prompts_for_table(
+        meta_data["table_name"],
+        schema_info,
+        row_count=meta_data["row_count"],
+        limit=6
+    )
+
     dataset_result = {
         "table_name": meta_data["table_name"],
         "original_filename": meta_data["original_filename"],
@@ -336,7 +357,8 @@ async def complete_chunk_upload(
         "column_count": meta_data["column_count"],
         "table_type": meta_data["table_type"],
         "schema_info": schema_info,
-        "cleaning_summary": cleaning_summary
+        "cleaning_summary": cleaning_summary,
+        "suggested_prompts": dataset_prompts
     }
 
     return {
@@ -350,6 +372,7 @@ async def complete_chunk_upload(
         "cleaning_summary": cleaning_summary,
         "star_schema_relationships": star_relationships,
         "datasets": [dataset_result],
+        "suggested_prompts": dataset_prompts,
         "processed_files_count": 1,
         "overall_summary": {
             "total_initial_rows": cleaning_summary["initial_rows"],
@@ -409,6 +432,14 @@ async def fetch_data_from_api(
             db=db
         )
 
+        dataset_prompts = generate_prompts_for_table(
+            dataset_result["table_name"],
+            schema_info,
+            row_count=dataset_result["row_count"],
+            limit=6
+        )
+        dataset_result["suggested_prompts"] = dataset_prompts
+
         return {
             "success": True,
             "table_name": dataset_result["table_name"],
@@ -420,6 +451,7 @@ async def fetch_data_from_api(
             "cleaning_summary": cleaning_summary,
             "star_schema_relationships": star_relationships,
             "datasets": [dataset_result],
+            "suggested_prompts": dataset_prompts,
             "processed_files_count": 1,
             "overall_summary": {
                 "total_initial_rows": cleaning_summary["initial_rows"],

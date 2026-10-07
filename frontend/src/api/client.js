@@ -294,8 +294,22 @@ export async function fetchRelationships() {
   return handleResponse(res, 'Failed to fetch schema relationships');
 }
 
-export async function fetchSuggestedQueries() {
-  const res = await fetch(`${API_BASE}/tables/suggested-queries`, {
+export async function fetchSuggestedQueries(tableName = null) {
+  const url = tableName 
+    ? `${API_BASE}/tables/suggested-queries?table_name=${encodeURIComponent(tableName)}`
+    : `${API_BASE}/tables/suggested-queries`;
+  const res = await fetch(url, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function fetchTableSuggestedPrompts(tableName = null) {
+  const url = tableName 
+    ? `${API_BASE}/tables/suggested-prompts?table_name=${encodeURIComponent(tableName)}`
+    : `${API_BASE}/tables/suggested-prompts`;
+  const res = await fetch(url, {
     headers: getAuthHeaders(),
   });
   if (!res.ok) return [];
@@ -565,8 +579,11 @@ export async function executeCopilotSql(sql) {
   return handleResponse(res, 'SQL execution failed');
 }
 
-export async function fetchCopilotPrompts() {
-  const res = await fetch(`${API_BASE}/copilot/prompts`, {
+export async function fetchCopilotPrompts(tableName = null) {
+  const url = tableName 
+    ? `${API_BASE}/copilot/prompts?table_name=${encodeURIComponent(tableName)}`
+    : `${API_BASE}/copilot/prompts`;
+  const res = await fetch(url, {
     headers: getAuthHeaders(),
   });
   if (!res.ok) return [];

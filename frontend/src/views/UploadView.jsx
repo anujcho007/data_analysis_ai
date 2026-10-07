@@ -60,7 +60,12 @@ const CLEANING_STAGES = [
   }
 ];
 
-export default function UploadView({ onUploadComplete, onUploadStateChange, setActiveTab }) {
+export default function UploadView({ 
+  onUploadComplete, 
+  onUploadStateChange, 
+  setActiveTab, 
+  onOpenCopilotWithPrompt 
+}) {
   const [ingestionTab, setIngestionTab] = useState('csv'); // 'csv' | 'api'
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -76,6 +81,7 @@ export default function UploadView({ onUploadComplete, onUploadStateChange, setA
   const [uploadError, setUploadError] = useState(null);
   const [processedDatasets, setProcessedDatasets] = useState([]);
   const [finalSummary, setFinalSummary] = useState(null);
+  const [suggestedPrompts, setSuggestedPrompts] = useState([]);
   const fileInputRef = useRef(null);
 
   // Notify parent of background upload status changes
@@ -254,6 +260,13 @@ export default function UploadView({ onUploadComplete, onUploadStateChange, setA
           setFileStageTexts(doneStages);
         }
 
+        if (result.suggested_prompts && result.suggested_prompts.length > 0) {
+          setSuggestedPrompts(result.suggested_prompts);
+        } else if (result.datasets) {
+          const collected = result.datasets.flatMap(d => d.suggested_prompts || []);
+          if (collected.length > 0) setSuggestedPrompts(collected);
+        }
+
         if (result.overall_summary) {
           setFinalSummary(result.overall_summary);
         }
@@ -330,26 +343,31 @@ export default function UploadView({ onUploadComplete, onUploadStateChange, setA
             let secondsElapsed = 0;
             const chunkCleanTimer = setInterval(() => {
               secondsElapsed++;
-              const calculatedPct = Math.min(95, Math.round(65 + (30 * (1 - Math.exp(-secondsElapsed / 45)))));
+              // Smooth asymptotic progress up to 98% while server processes large datasets
+              const calculatedPct = Math.min(98, Math.round(65 + (33 * (1 - Math.exp(-secondsElapsed / 60)))));
               setFileProgresses(prev => ({ ...prev, [file.name]: calculatedPct }));
               setOverallProgress(calculatedPct);
 
-              if (secondsElapsed < 12) {
+              if (secondsElapsed < 15) {
                 setCurrentStageIndex(2);
                 setStageStatusText(`Assembling chunks & normalizing schema for ${file.name} (${secondsElapsed}s)...`);
                 setFileStageTexts(prev => ({ ...prev, [file.name]: 'Schema Normalization' }));
-              } else if (secondsElapsed < 35) {
+              } else if (secondsElapsed < 50) {
                 setCurrentStageIndex(3);
-                setStageStatusText(`Vectorized cleaning & streaming records into warehouse (${secondsElapsed}s, large files take ~45-90s)...`);
+                setStageStatusText(`Vectorized cleaning & streaming records into warehouse (${secondsElapsed}s, large files take 1-3 mins)...`);
                 setFileStageTexts(prev => ({ ...prev, [file.name]: 'Ingesting Rows' }));
-              } else if (secondsElapsed < 65) {
+              } else if (secondsElapsed < 100) {
                 setCurrentStageIndex(4);
-                setStageStatusText(`Imputing null values & deduplicating records (${secondsElapsed}s, please wait)...`);
-                setFileStageTexts(prev => ({ ...prev, [file.name]: 'Deduplicating' }));
+                setStageStatusText(`Imputing null values & deduplicating records (${secondsElapsed}s, server actively crunching in memory)...`);
+                setFileStageTexts(prev => ({ ...prev, [file.name]: 'Deduplicating & Imputing' }));
+              } else if (secondsElapsed < 160) {
+                setCurrentStageIndex(5);
+                setStageStatusText(`Building high-speed B-Tree indexes on warehouse (${secondsElapsed}s, server actively processing)...`);
+                setFileStageTexts(prev => ({ ...prev, [file.name]: 'Indexing Warehouse' }));
               } else {
                 setCurrentStageIndex(5);
-                setStageStatusText(`Building high-speed B-Tree indexes on warehouse (${secondsElapsed}s, finalizing)...`);
-                setFileStageTexts(prev => ({ ...prev, [file.name]: 'Indexing Warehouse' }));
+                setStageStatusText(`Finalizing Star Schema & generating dynamic AI prompts (${secondsElapsed}s, almost ready)...`);
+                setFileStageTexts(prev => ({ ...prev, [file.name]: 'Finalizing Ingestion' }));
               }
             }, 1000);
 
@@ -420,6 +438,10 @@ export default function UploadView({ onUploadComplete, onUploadStateChange, setA
         setCurrentStageIndex(5);
         setStageStatusText('All files cleaned, transformed, and ingested into Star Schema warehouse!');
         setProcessedDatasets(allDatasets);
+        const collectedPrompts = allDatasets.flatMap(d => d.suggested_prompts || []);
+        if (collectedPrompts.length > 0) {
+          setSuggestedPrompts(collectedPrompts);
+        }
         setFinalSummary({
           total_initial_rows: totalInitial,
           total_final_rows: totalFinal,
@@ -1203,6 +1225,99 @@ export default function UploadView({ onUploadComplete, onUploadStateChange, setA
             </div>
           </div>
 
+          {/* AI Suggested Prompts for Ingested Data */}
+          {suggestedPrompts && suggestedPrompts.length > 0 && (
+            <div style={{
+              marginBottom: '28px',
+              padding: '22px 24px',
+              background: 'linear-gradient(135deg, rgba(238, 242, 255, 0.95) 0%, rgba(240, 249, 255, 0.95) 100%)',
+              borderRadius: 'var(--radius-md)',
+              border: '1.5px solid #c7d2fe',
+              boxShadow: '0 4px 20px -2px rgba(79, 70, 229, 0.08)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '10px',
+                    background: 'linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#ffffff',
+                    boxShadow: '0 4px 10px rgba(79, 70, 229, 0.3)'
+                  }}>
+                    <Sparkles size={18} />
+                  </div>
+                  <div>
+                    <h4 style={{ fontSize: '1.05rem', fontWeight: '800', color: '#1e1b4b', margin: 0 }}>
+                      AI Suggested Prompts for Ingested Data
+                    </h4>
+                    <p style={{ fontSize: '0.8rem', color: '#4338ca', margin: '2px 0 0 0' }}>
+                      Questions synthesized directly from your newly uploaded columns, metrics & categories
+                    </p>
+                  </div>
+                </div>
+                <span style={{
+                  fontSize: '0.72rem',
+                  fontWeight: '700',
+                  padding: '4px 12px',
+                  borderRadius: '9999px',
+                  background: '#e0e7ff',
+                  color: '#4338ca'
+                }}>
+                  {suggestedPrompts.length} dynamic queries
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                {suggestedPrompts.map((p, pIdx) => (
+                  <button
+                    key={pIdx}
+                    type="button"
+                    onClick={() => {
+                      if (onOpenCopilotWithPrompt) {
+                        onOpenCopilotWithPrompt(p);
+                      } else {
+                        setActiveTab('schema');
+                      }
+                    }}
+                    style={{
+                      background: '#ffffff',
+                      border: '1px solid #c7d2fe',
+                      borderRadius: '12px',
+                      padding: '8px 14px',
+                      fontSize: '0.825rem',
+                      color: '#1e293b',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      boxShadow: '0 2px 4px rgba(79, 70, 229, 0.05)',
+                      transition: 'all 0.15s ease'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = '#4f46e5';
+                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(79, 70, 229, 0.15)';
+                      e.currentTarget.style.transform = 'translateY(-1px)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = '#c7d2fe';
+                      e.currentTarget.style.boxShadow = '0 2px 4px rgba(79, 70, 229, 0.05)';
+                      e.currentTarget.style.transform = 'translateY(0)';
+                    }}
+                  >
+                    <span style={{ color: '#4f46e5', fontWeight: '800' }}>⚡</span>
+                    <span>{p}</span>
+                    <ArrowRight size={13} color="#6366f1" style={{ marginLeft: 'auto', flexShrink: 0 }} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Per-Table Cards */}
           <h4 style={{ fontSize: '1.05rem', marginBottom: '16px', color: '#0f172a' }}>Dynamically Generated Table Schemas</h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -1266,6 +1381,54 @@ export default function UploadView({ onUploadComplete, onUploadStateChange, setA
                     </span>
                   ))}
                 </div>
+
+                {/* Per-Table AI Prompts */}
+                {dataset.suggested_prompts && dataset.suggested_prompts.length > 0 && (
+                  <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid #f1f5f9', display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: '700' }}>
+                      💡 Quick Prompts:
+                    </span>
+                    {dataset.suggested_prompts.slice(0, 3).map((prompt, prIdx) => (
+                      <button
+                        key={prIdx}
+                        type="button"
+                        onClick={() => {
+                          if (onOpenCopilotWithPrompt) {
+                            onOpenCopilotWithPrompt(prompt, dataset.table_name);
+                          } else {
+                            setActiveTab('schema');
+                          }
+                        }}
+                        style={{
+                          background: '#f8fafc',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '8px',
+                          padding: '3px 10px',
+                          fontSize: '0.72rem',
+                          color: '#334155',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          transition: 'all 0.15s ease'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = '#eef2ff';
+                          e.currentTarget.style.borderColor = '#c7d2fe';
+                          e.currentTarget.style.color = '#4338ca';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = '#f8fafc';
+                          e.currentTarget.style.borderColor = '#e2e8f0';
+                          e.currentTarget.style.color = '#334155';
+                        }}
+                      >
+                        <span style={{ color: '#4f46e5' }}>⚡</span>
+                        <span>{prompt}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>

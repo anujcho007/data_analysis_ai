@@ -74,8 +74,16 @@ export default function App() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
+  const [copilotInitialPrompt, setCopilotInitialPrompt] = useState(null);
+  const [copilotActiveTable, setCopilotActiveTable] = useState(null);
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [activeWorkspace, setActiveWorkspace] = useState(null);
+
+  const handleOpenCopilotWithPrompt = (promptText, tableName = null) => {
+    setCopilotInitialPrompt(promptText);
+    setCopilotActiveTable(tableName);
+    setIsCopilotOpen(true);
+  };
   const [isTabsVisible, setIsTabsVisible] = useState(() => {
     const saved = localStorage.getItem('dataforge_right_tabs_visible');
     return saved !== null ? saved === 'true' : true;
@@ -306,6 +314,7 @@ export default function App() {
               relationships={relationships} 
               setActiveTab={setActiveTab}
               onRefresh={loadAllData} 
+              onOpenCopilotWithPrompt={handleOpenCopilotWithPrompt}
             />
           )}
 
@@ -370,6 +379,7 @@ export default function App() {
               onUploadComplete={handleUploadComplete} 
               onUploadStateChange={setUploadStatus}
               setActiveTab={setActiveTab} 
+              onOpenCopilotWithPrompt={handleOpenCopilotWithPrompt}
             />
           </div>
 
@@ -445,7 +455,14 @@ export default function App() {
         {isCopilotOpen && (
           <CopilotDrawer
             isOpen={isCopilotOpen}
-            onClose={() => setIsCopilotOpen(false)}
+            onClose={() => {
+              setIsCopilotOpen(false);
+              setCopilotInitialPrompt(null);
+            }}
+            tables={tables}
+            initialPrompt={copilotInitialPrompt}
+            activeTable={copilotActiveTable}
+            onClearInitialPrompt={() => setCopilotInitialPrompt(null)}
           />
         )}
       </Suspense>

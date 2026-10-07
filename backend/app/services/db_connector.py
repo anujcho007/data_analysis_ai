@@ -190,6 +190,14 @@ def sync_table_to_warehouse(
 
         star_relationships = detect_star_schema_relationships(warehouse_db)
 
+        from app.services.prompt_generator import generate_prompts_for_table
+        suggested_prompts = generate_prompts_for_table(
+            metadata.table_name,
+            schema_info,
+            row_count=metadata.row_count,
+            limit=6
+        )
+
         return {
             "success": True,
             "table_name": metadata.table_name,
@@ -199,7 +207,8 @@ def sync_table_to_warehouse(
             "table_type": metadata.table_type,
             "schema_info": schema_info,
             "cleaning_summary": cleaning_summary,
-            "star_schema_relationships": star_relationships
+            "star_schema_relationships": star_relationships,
+            "suggested_prompts": suggested_prompts
         }
     finally:
         engine.dispose()

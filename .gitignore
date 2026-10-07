@@ -26,6 +26,7 @@ ENV/
 
 # Database and uploaded files
 backend/storage/warehouse.db*
+*.db
 test_lock.db
 backend/storage/raw_uploads/*
 !backend/storage/raw_uploads/.gitkeep
